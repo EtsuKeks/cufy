@@ -97,54 +97,82 @@ class Runner(ABC):
         return w
 
     def _prepare_fit_batch(
-        self, df: pd.DataFrame
+        self, df_f: pd.DataFrame
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        df_f, _ = self._validate_filtered(df, self.filter_df(df))
+        if len(df_f) == 0:
+            raise ValueError("Filtered dataframe must not be empty")
         S, K, T, is_call, close, close_IV = split_df(df_f)
         r = self._resolve_r(df_f)
         w = self._validate_w(df_f, self.compute_weights(df_f))
         return S, K, T, is_call, close, close_IV, r, w
 
-    def find_initial_params(self, df: pd.DataFrame) -> None:
-        S, K, T, is_call, close, close_IV, r, w = self._prepare_fit_batch(df)
+    def _prepare_fit_batch_maybe_filter(
+        self, df: pd.DataFrame, to_filter: bool
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        if to_filter:
+            df, _ = self._validate_filtered(df, self.filter_df(df))
+        return self._prepare_fit_batch(df)
+
+    def find_initial_params(self, df: pd.DataFrame, to_filter: bool = True) -> None:
+        S, K, T, is_call, close, close_IV, r, w = self._prepare_fit_batch_maybe_filter(df, to_filter)
         for _, model in self.running_pairs.items():
             model.find_initial_params(S=S, K=K, T=T, is_call=is_call, close=close, close_IV=close_IV, r=r, w=w)
 
-    def calibrate(self, df: pd.DataFrame) -> None:
-        S, K, T, is_call, close, close_IV, r, w = self._prepare_fit_batch(df)
+    def calibrate(self, df: pd.DataFrame, to_filter: bool = True) -> None:
+        S, K, T, is_call, close, close_IV, r, w = self._prepare_fit_batch_maybe_filter(df, to_filter)
         for _, model in self.running_pairs.items():
             model.calibrate(S=S, K=K, T=T, is_call=is_call, close=close, close_IV=close_IV, r=r, w=w)
 
-    def price(self, df: pd.DataFrame) -> pd.DataFrame:
-        df_f, pos = self._validate_filtered(df, self.filter_df(df))
-        S, K, T, is_call, _, _= split_df(df_f)
+    def price(self, df: pd.DataFrame, to_filter: bool = True) -> pd.DataFrame:
+        if to_filter:
+            df_f, pos = self._validate_filtered(df, self.filter_df(df))
+        else:
+            if len(df) == 0:
+                raise ValueError("Filtered dataframe must not be empty")
+            df_f = df
+            pos = None
+
+        S, K, T, is_call, _, _ = split_df(df_f)
         r = self._resolve_r(df_f)
         S_t, K_t, T_t, is_call_t, r_t = inputs_1d(S=S, K=K, T=T, is_call=is_call, r=r)
+
+        def _assign_column(name: str, values: np.ndarray | object) -> None:
+            if not to_filter:
+                df[name] = values
+                return
+
+            if isinstance(values, np.ndarray):
+                if values.dtype == object:
+                    out = np.full(df.shape[0], None, dtype=object)
+                else:
+                    out = np.full(df.shape[0], np.nan)
+                out[pos] = values
+            else:
+                out = np.full(
+                    df.shape[0],
+                    None if isinstance(values, str) else np.nan,
+                    dtype=object if isinstance(values, str) else None
+                )
+                out[pos] = values
+            df[name] = out
+
         for tag, model in self.running_pairs.items():
-            out = np.full(df.shape[0], np.nan)
             pred = model.price(S=S, K=K, T=T, is_call=is_call, r=r)
-            out[pos] = pred
-            df[f"{tag}_price"] = out
 
             with torch.no_grad():
                 price_t = torch.as_tensor(pred, device=settings.device, dtype=settings.dtype).reshape(1, -1)
                 iv_t = implied_vol_newton_bs(price=price_t, S=S_t, K=K_t, T=T_t, is_call=is_call_t, r=r_t)[0]
                 iv = iv_t.detach().cpu().numpy()
-            out_iv = np.full(df.shape[0], np.nan)
-            out_iv[pos] = iv
-            df[f"{tag}_iv"] = out_iv
+
+            _assign_column(f"{tag}_price", pred)
+            _assign_column(f"{tag}_iv", iv)
 
             if isinstance(model, ParameterizedModel):
                 for label, params in model.get_params().items():
                     for name, value in params.items():
-                        out_param = np.full(df.shape[0], np.nan)
-                        out_param[pos] = value
-                        df[f"{tag}_{label}_{name}"] = out_param
+                        _assign_column(f"{tag}_{label}_{name}", value)
 
                 for label, facts in model.get_facts().items():
                     for name, value in facts.items():
-                        out_fact = np.full(df.shape[0], None, dtype=object)
-                        out_fact[pos] = value
-                        df[f"{tag}_{label}_{name}"] = out_fact
-
+                        _assign_column(f"{tag}_{label}_{name}", value)
         return df

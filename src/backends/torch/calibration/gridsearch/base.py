@@ -196,23 +196,23 @@ class GridSearchModel(ParameterizedModel, ABC):
 
     def _run_search_stage(self, *, p_min: torch.Tensor, p_max: torch.Tensor, data: Batch1D) -> None:
         if self._param_batch_size is not None:
-            self.save_fact("explored", "batch_capacity", self._param_batch_size)
+            self.save_fact("explored", "batch_capacity", str(self._param_batch_size))
 
         if self.gs.initial_sampler == "sobol":
-            self.save_fact("explored", "budget_batches", self._search_batches)
+            self.save_fact("explored", "budget_batches", str(self._search_batches))
         else:
             self.save_fact("explored", "budget_points", str(self._search_points_detailed))
 
         t0 = time.perf_counter()
         self._explore(p_min=p_min, p_max=p_max, data=data)
         t1 = time.perf_counter()
-        self.save_fact("explored", "elapsed_sec", t1 - t0)
+        self.save_fact("explored", "elapsed_sec", str(t1 - t0))
         self.save_params("explored")
 
         t0 = time.perf_counter()
         self.refine(p_min=p_min, p_max=p_max, data=data)
         t1 = time.perf_counter()
-        self.save_fact("refined", "elapsed_sec", t1 - t0)
+        self.save_fact("refined", "elapsed_sec", str(t1 - t0))
         self.save_params("refined")
 
     def find_initial_params(

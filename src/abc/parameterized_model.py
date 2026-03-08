@@ -70,21 +70,13 @@ class ParameterizedModel(Model, ABC):
         return params
 
     def save_params(self, label: str) -> None:
-        self._validate_store_key(label, "label")
         self._saved_params[label] = {p._name: np.nan if p.value is None else p.value for p in self.params}
 
     def get_params(self) -> dict[str, dict[str, float]]:
         return copy.deepcopy(self._saved_params)
 
-    def save_fact(self, label: str, key: str, value: object) -> None:
-        self._validate_store_key(label, "label")
-        self._validate_store_key(key, "key")
+    def save_fact(self, label: str, key: str, value: str) -> None:
         self._saved_facts.setdefault(label, {})[key] = str(value)
 
     def get_facts(self) -> dict[str, dict[str, str]]:
         return copy.deepcopy(self._saved_facts)
-
-    @staticmethod
-    def _validate_store_key(value: str, field_name: str) -> None:
-        if not isinstance(value, str) or not value:
-            raise ValueError(f"{field_name} must be a non-empty string")

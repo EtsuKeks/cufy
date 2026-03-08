@@ -8,7 +8,7 @@ _SQRT2 = float(np.sqrt(2.0))
 _SQRT2PI = float(np.sqrt(2.0 * np.pi))
 
 
-def _check_settings_dtype(**tensors: torch.Tensor) -> None:
+def check_settings_tensors(**tensors: torch.Tensor) -> None:
     dt = settings.dtype
     d = settings.device
     if "is_call" in tensors and tensors["is_call"].dtype != torch.bool:
@@ -32,7 +32,7 @@ def norm_pdf(x: torch.Tensor) -> torch.Tensor:
 def bs_price(
     *, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, is_call: torch.Tensor, r: torch.Tensor, sigma: torch.Tensor
 ) -> torch.Tensor:
-    _check_settings_dtype(S=S, K=K, T=T, is_call=is_call, r=r, sigma=sigma)
+    check_settings_tensors(S=S, K=K, T=T, is_call=is_call, r=r, sigma=sigma)
     eps_t = torch.as_tensor(settings.ppl.epsilon, device=S.device, dtype=settings.dtype)
     S_b, K_b, T_b, is_call_b, r_b = S[None, :], K[None, :], T[None, :], is_call[None, :], r[None, :]
     sqrtT = torch.sqrt(torch.clamp(T_b, min=eps_t))
@@ -54,7 +54,7 @@ def bs_price(
 
 
 def bs_vega(*, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, r: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-    _check_settings_dtype(S=S, K=K, T=T, r=r, sigma=sigma)
+    check_settings_tensors(S=S, K=K, T=T, r=r, sigma=sigma)
     eps_t = torch.as_tensor(settings.ppl.epsilon, device=S.device, dtype=settings.dtype)
     S_b, K_b, T_b, r_b = S[None, :], K[None, :], T[None, :], r[None, :]
     sqrtT = torch.sqrt(torch.clamp(T_b, min=eps_t))
@@ -68,7 +68,7 @@ def bs_vega(*, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, r: torch.Tenso
 def bs_implied_vol_proxy_dsigma_dprice(
     *, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, r: torch.Tensor, sigma: torch.Tensor
 ) -> torch.Tensor:
-    _check_settings_dtype(S=S, K=K, T=T, r=r, sigma=sigma)
+    check_settings_tensors(S=S, K=K, T=T, r=r, sigma=sigma)
     eps_t = torch.as_tensor(settings.ppl.epsilon, device=sigma.device, dtype=sigma.dtype)
     vega = bs_vega(S=S, K=K, T=T, r=r, sigma=sigma).clamp_min(eps_t)
     return 1.0 / vega
@@ -104,7 +104,7 @@ def weighted_iv_l2_from_prices(
     r: torch.Tensor,
     w: torch.Tensor,
 ) -> torch.Tensor:
-    _check_settings_dtype(market_iv=market_iv, pred_prices=pred_prices, S=S, K=K, T=T, is_call=is_call, r=r, w=w)
+    check_settings_tensors(market_iv=market_iv, pred_prices=pred_prices, S=S, K=K, T=T, is_call=is_call, r=r, w=w)
     pred_iv = implied_vol_newton_bs(price=pred_prices, S=S, K=K, T=T, is_call=is_call, r=r, sigma_init=market_iv)
     d = pred_iv - market_iv[None, :]
     s = torch.sum(w[None, :] * (d * d), 1)
@@ -126,9 +126,9 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
         max_sigma: float,
     ) -> torch.Tensor:
         if sigma_init is not None:
-            _check_settings_dtype(price=price, S=S, K=K, T=T, is_call=is_call, r=r, sigma_init=sigma_init)
+            check_settings_tensors(price=price, S=S, K=K, T=T, is_call=is_call, r=r, sigma_init=sigma_init)
         else:
-            _check_settings_dtype(price=price, S=S, K=K, T=T, is_call=is_call, r=r)
+            check_settings_tensors(price=price, S=S, K=K, T=T, is_call=is_call, r=r)
 
         with torch.no_grad():
             price_p = price.detach()

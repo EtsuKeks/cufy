@@ -198,7 +198,7 @@ class GridSearchModel(ParameterizedModel, ABC):
         if self._param_batch_size is not None:
             self.save_fact("explored", "batch_capacity", self._param_batch_size)
 
-        if self._search_batches is not None:
+        if self.gs.initial_sampler == "sobol":
             self.save_fact("explored", "budget_batches", self._search_batches)
         else:
             self.save_fact("explored", "budget_points", str(self._search_points_detailed))

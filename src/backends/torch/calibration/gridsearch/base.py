@@ -10,7 +10,7 @@ from src.abc.parameterized_model import ModelParam, ParameterizedModel
 from src.config.config import settings
 from src.utils.implied_vol import weighted_iv_l2_from_prices
 from src.utils.memory_probation import probe_param_batch_sizes
-from src.utils.torch_utils import Batch1D, inputs_1d
+from src.utils.torch_utils import Batch1D
 
 
 class GridSearchModelParam(ModelParam):
@@ -63,22 +63,18 @@ class GridSearchModel(ParameterizedModel, ABC):
                 f"Grid sampler requires points_{stage_name} for all parameters when initial_sampler='grid'"
             )
 
-    def _update_peak_bytes(
-        self, *, S: np.ndarray, K: np.ndarray, T: np.ndarray, is_call: np.ndarray, r: np.ndarray
-    ) -> None:
+    def _update_peak_bytes(self, *, data: Batch1D) -> None:
         self._set_explore_plan()
-        n_bucket = int(S.shape[0])
+        n_bucket = int(data.S.shape[0])
         if self._param_batch_sizer is not None:
             self._param_batch_size = self._param_batch_sizer(n_bucket)
             return
 
         d = settings.device
         dt = settings.dtype
-        S_t, K_t, T_t, is_call_t, r_t = inputs_1d(S=S, K=K, T=T, is_call=is_call, r=r)
-
         pmin = torch.tensor([p.min_value for p in self.params], device=d, dtype=dt)
         pmax = torch.tensor([p.max_value for p in self.params], device=d, dtype=dt)
-        make_f = self.probe(S_t=S_t, K_t=K_t, T_t=T_t, is_call_t=is_call_t, r_t=r_t, pmin=pmin, pmax=pmax)
+        make_f = self.probe(data=data, pmin=pmin, pmax=pmax)
 
         self._param_batch_sizer = probe_param_batch_sizes(
             make_f=make_f,
@@ -89,15 +85,7 @@ class GridSearchModel(ParameterizedModel, ABC):
         self._param_batch_size = self._param_batch_sizer(n_bucket)
 
     def probe(
-        self,
-        *,
-        S_t: torch.Tensor,
-        K_t: torch.Tensor,
-        T_t: torch.Tensor,
-        is_call_t: torch.Tensor,
-        r_t: torch.Tensor,
-        pmin: torch.Tensor,
-        pmax: torch.Tensor,
+        self, *, data: Batch1D, pmin: torch.Tensor, pmax: torch.Tensor
     ) -> Callable[[int, int], Callable[[], None]]:
         d = settings.device
         dt = settings.dtype
@@ -107,10 +95,7 @@ class GridSearchModel(ParameterizedModel, ABC):
             def _run():
                 with torch.no_grad():
                     P = pmin[None, :] + (pmax - pmin)[None, :] * torch.rand((m, p_dim), device=d, dtype=dt)
-                    _ = self.prices_for_param_matrix(
-                        S=S_t[: n], K=K_t[: n], T=T_t[: n], is_call=is_call_t[: n], param_matrix=P, r=r_t[: n]
-                    )
-
+                    _ = self.prices_for_param_matrix(data=data.slice(n), param_matrix=P)
             return _run
 
         return make_f
@@ -121,19 +106,8 @@ class GridSearchModel(ParameterizedModel, ABC):
         with torch.no_grad():
             for s in range(0, int(P.shape[0]), self._param_batch_size):
                 Pc = P[s : s + self._param_batch_size]
-                preds = self.prices_for_param_matrix(
-                    S=data.S_t, K=data.K_t, T=data.T_t, is_call=data.is_call_t, param_matrix=Pc, r=data.r_t
-                )
-                out[s : s + self._param_batch_size] = weighted_iv_l2_from_prices(
-                    market_iv=data.close_IV_t,
-                    pred_prices=preds,
-                    S=data.S_t,
-                    K=data.K_t,
-                    T=data.T_t,
-                    is_call=data.is_call_t,
-                    r=data.r_t,
-                    w=data.w_t,
-                )
+                preds = self.prices_for_param_matrix(data=data, param_matrix=Pc)
+                out[s : s + self._param_batch_size] = weighted_iv_l2_from_prices(data=data, pred_prices=preds)
         return out
 
     @property
@@ -236,7 +210,7 @@ class GridSearchModel(ParameterizedModel, ABC):
         p_min = torch.tensor([p.min_value for p in self.params], device=d, dtype=settings.dtype)
         p_max = torch.tensor([p.max_value for p in self.params], device=d, dtype=settings.dtype)
         data = Batch1D.from_numpy(S=S, K=K, T=T, is_call=is_call, close_IV=close_IV, r=r, w=w)
-        self._update_peak_bytes(S=data.S, K=data.K, T=data.T, is_call=data.is_call, r=data.r)
+        self._update_peak_bytes(data=data)
         self._run_search_stage(p_min=p_min, p_max=p_max, data=data)
 
     def calibrate(
@@ -262,7 +236,7 @@ class GridSearchModel(ParameterizedModel, ABC):
         p_min = torch.tensor([max(p.min_value, p.value - p.radius_calibrate) for p in self.params], device=d, dtype=dt)
         p_max = torch.tensor([min(p.max_value, p.value + p.radius_calibrate) for p in self.params], device=d, dtype=dt)
         data = Batch1D.from_numpy(S=S, K=K, T=T, is_call=is_call, close_IV=close_IV, r=r, w=w)
-        self._update_peak_bytes(S=data.S, K=data.K, T=data.T, is_call=data.is_call, r=data.r)
+        self._update_peak_bytes(data=data)
         self._run_search_stage(p_min=p_min, p_max=p_max, data=data)
 
     def price(self, *, S: np.ndarray, K: np.ndarray, T: np.ndarray, is_call: np.ndarray, r: np.ndarray) -> np.ndarray:
@@ -270,7 +244,9 @@ class GridSearchModel(ParameterizedModel, ABC):
             raise RuntimeError("price() called before find_initial_params()")
 
         P = torch.tensor([[p.value for p in self.params]], device=settings.device, dtype=settings.dtype)
+        dummy_w = np.ones_like(S, dtype=np.float64)
+        dummy_iv = np.zeros_like(S, dtype=np.float64)
+        data = Batch1D.from_numpy(S=S, K=K, T=T, is_call=is_call, close_IV=dummy_iv, r=r, w=dummy_w)
         with torch.no_grad():
-            S_t, K_t, T_t, is_call_t, r_t = inputs_1d(S=S, K=K, T=T, is_call=is_call, r=r)
-            out = self.prices_for_param_matrix(S=S_t, K=K_t, T=T_t, is_call=is_call_t, param_matrix=P, r=r_t)[0]
+            out = self.prices_for_param_matrix(data=data, param_matrix=P)[0]
         return out.detach().cpu().numpy()

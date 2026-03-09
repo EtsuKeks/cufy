@@ -1,5 +1,5 @@
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, model_validator  # type: ignore
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class PipelineSettings(BaseModel):

@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 import torch
-from pydantic import BaseModel, ConfigDict, Field  # type: ignore
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.config.ppl_config import PipelineSettings
 

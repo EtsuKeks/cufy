@@ -109,7 +109,6 @@ def probe_param_batch_sizes(
     for m, n in points:
         peak = _probe_peak_bytes(make_f, m, n)
         if int(peak) < 0:
-            # OOM (or equivalent) during probing: stop and fit on collected samples.
             break
         samples.append((m, n, peak))
 

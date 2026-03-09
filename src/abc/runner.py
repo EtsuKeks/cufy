@@ -8,7 +8,7 @@ import torch
 from src.abc.model import Model
 from src.abc.parameterized_model import ParameterizedModel
 from src.config.config import settings
-from src.utils.implied_vol import implied_vol_newton_bs
+from src.utils.implied_vol import implied_vol_newton
 from src.utils.torch_utils import Batch1D
 
 
@@ -75,8 +75,8 @@ class Runner(ABC):
         r = ct.map(rates)
         if r.isna().any():
             raise ValueError(
-                f"Missing interest rate(s) for some option observation times: {r.index[r.isna()].tolist()}"
-                "You must provide interest_rate_csv rows for ALL dates/times where you want to price options."
+                f"Missing interest rate(s) for some option observation times: {r.index[r.isna()].tolist()}. "
+                "You must provide interest_rate_csv rows for ALL dates/times where you want to price options"
             )
 
         return r.to_numpy()
@@ -163,7 +163,7 @@ class Runner(ABC):
                 dummy_w = np.ones_like(S, dtype=np.float64)
                 dummy_iv = np.zeros_like(S, dtype=np.float64)
                 batch = Batch1D.from_numpy(S=S, K=K, T=T, is_call=is_call, close_IV=dummy_iv, r=r, w=dummy_w)
-                iv_t = implied_vol_newton_bs(price=price_t, data=batch)[0]
+                iv_t = implied_vol_newton(price=price_t, data=batch)[0]
                 iv = iv_t.detach().cpu().numpy()
 
             _assign_column(f"{tag}_price", pred)

@@ -1,7 +1,8 @@
 import torch
 
 from src.config.config import settings
-from src.utils.implied_vol import bs_price, check_settings_tensors
+from src.utils.implied_vol import bs_price
+from src.utils.torch_utils import Batch1D
 from src.abc.parameterized_model import ParameterizedModel, ModelParam
 
 
@@ -54,22 +55,12 @@ class SABR(ParameterizedModel):
     rho = ModelParam(position=2, min_value=-0.999, max_value=0.999)
     nu = ModelParam(position=3, min_value=1e-4, max_value=10.0)
 
-    def prices_for_param_matrix(
-        self,
-        *,
-        S: torch.Tensor,
-        K: torch.Tensor,
-        T: torch.Tensor,
-        is_call: torch.Tensor,
-        param_matrix: torch.Tensor,
-        r: torch.Tensor,
-    ) -> torch.Tensor:
-        check_settings_tensors(S=S, K=K, T=T, is_call=is_call, r=r, param_matrix=param_matrix)
-        F = S * torch.exp(r * T)
+    def prices_for_param_matrix(self, *, data: Batch1D, param_matrix: torch.Tensor) -> torch.Tensor:
+        F = data.S_t * torch.exp(data.r_t * data.T_t)
         alpha = param_matrix[:, 0:1]
         beta = param_matrix[:, 1:2]
         rho = param_matrix[:, 2:3]
         nu = param_matrix[:, 3:4]
 
-        sigma_B = _sabr_implied_vol_hagan(F=F, K=K, T=T, alpha=alpha, beta=beta, rho=rho, nu=nu)
-        return bs_price(S=S, K=K, T=T, is_call=is_call, r=r, sigma=sigma_B)
+        sigma_B = _sabr_implied_vol_hagan(F=F, K=data.K_t, T=data.T_t, alpha=alpha, beta=beta, rho=rho, nu=nu)
+        return bs_price(data=data, sigma=sigma_B)

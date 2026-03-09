@@ -3,6 +3,7 @@ import torch
 from torch.autograd.function import once_differentiable
 
 from src.config.config import settings
+from src.utils.torch_utils import Batch1D
 
 _SQRT2 = float(np.sqrt(2.0))
 _SQRT2PI = float(np.sqrt(2.0 * np.pi))
@@ -29,7 +30,7 @@ def norm_pdf(x: torch.Tensor) -> torch.Tensor:
     return torch.exp(-0.5 * x * x) / _SQRT2PI
 
 
-def bs_price(
+def _bs_price_raw(
     *, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, is_call: torch.Tensor, r: torch.Tensor, sigma: torch.Tensor
 ) -> torch.Tensor:
     check_settings_tensors(S=S, K=K, T=T, is_call=is_call, r=r, sigma=sigma)
@@ -53,8 +54,13 @@ def bs_price(
     return torch.where(is_call_b, call, put)
 
 
-def bs_vega(*, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, r: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-    check_settings_tensors(S=S, K=K, T=T, r=r, sigma=sigma)
+def bs_price(*, data: Batch1D, sigma: torch.Tensor) -> torch.Tensor:
+    return _bs_price_raw(S=data.S_t, K=data.K_t, T=data.T_t, is_call=data.is_call_t, r=data.r_t, sigma=sigma)
+
+
+def _bs_vega_raw(
+    *, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, r: torch.Tensor, sigma: torch.Tensor
+) -> torch.Tensor:
     eps_t = torch.as_tensor(settings.ppl.epsilon, device=S.device, dtype=settings.dtype)
     S_b, K_b, T_b, r_b = S[None, :], K[None, :], T[None, :], r[None, :]
     sqrtT = torch.sqrt(torch.clamp(T_b, min=eps_t))
@@ -65,23 +71,28 @@ def bs_vega(*, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, r: torch.Tenso
     return K_b * disc * norm_pdf(d2) * sqrtT
 
 
-def bs_implied_vol_proxy_dsigma_dprice(
+def bs_vega(*, data: Batch1D, sigma: torch.Tensor) -> torch.Tensor:
+    return _bs_vega_raw(S=data.S_t, K=data.K_t, T=data.T_t, r=data.r_t, sigma=sigma)
+
+
+def _bs_implied_vol_proxy_dsigma_dprice_raw(
     *, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, r: torch.Tensor, sigma: torch.Tensor
 ) -> torch.Tensor:
-    check_settings_tensors(S=S, K=K, T=T, r=r, sigma=sigma)
     eps_t = torch.as_tensor(settings.ppl.epsilon, device=sigma.device, dtype=sigma.dtype)
-    vega = bs_vega(S=S, K=K, T=T, r=r, sigma=sigma).clamp_min(eps_t)
+    vega = _bs_vega_raw(S=S, K=K, T=T, r=r, sigma=sigma).clamp_min(eps_t)
+    return 1.0 / vega
+
+
+def bs_implied_vol_proxy_dsigma_dprice(*, data: Batch1D, sigma: torch.Tensor) -> torch.Tensor:
+    eps_t = torch.as_tensor(settings.ppl.epsilon, device=sigma.device, dtype=sigma.dtype)
+    vega = bs_vega(data=data, sigma=sigma).clamp_min(eps_t)
     return 1.0 / vega
 
 
 def implied_vol_newton_bs(
     *,
     price: torch.Tensor,
-    S: torch.Tensor,
-    K: torch.Tensor,
-    T: torch.Tensor,
-    is_call: torch.Tensor,
-    r: torch.Tensor,
+    data: Batch1D,
     sigma_init: torch.Tensor | None = None,
     max_iter: int = 25,
     max_sigma: float = 10.0,
@@ -90,24 +101,15 @@ def implied_vol_newton_bs(
         raise ValueError(f"max_iter must be positive, got {max_iter}")
     if max_sigma <= 0.0:
         raise ValueError(f"max_sigma must be positive, got {max_sigma}")
-    return _ImpliedVolNewtonBS.apply(price, S, K, T, is_call, r, sigma_init, max_iter, max_sigma)
+    return _ImpliedVolNewtonBS.apply(
+        price, data.S_t, data.K_t, data.T_t, data.is_call_t, data.r_t, sigma_init, max_iter, max_sigma
+    )
 
 
-def weighted_iv_l2_from_prices(
-    *,
-    market_iv: torch.Tensor,
-    pred_prices: torch.Tensor,
-    S: torch.Tensor,
-    K: torch.Tensor,
-    T: torch.Tensor,
-    is_call: torch.Tensor,
-    r: torch.Tensor,
-    w: torch.Tensor,
-) -> torch.Tensor:
-    check_settings_tensors(market_iv=market_iv, pred_prices=pred_prices, S=S, K=K, T=T, is_call=is_call, r=r, w=w)
-    pred_iv = implied_vol_newton_bs(price=pred_prices, S=S, K=K, T=T, is_call=is_call, r=r, sigma_init=market_iv)
-    d = pred_iv - market_iv[None, :]
-    s = torch.sum(w[None, :] * (d * d), 1)
+def weighted_iv_l2_from_prices(*, data: Batch1D, pred_prices: torch.Tensor) -> torch.Tensor:
+    pred_iv = implied_vol_newton_bs(price=pred_prices, data=data, sigma_init=data.close_IV_t)
+    d = pred_iv - data.close_IV_t[None, :]
+    s = torch.sum(data.w_t[None, :] * (d * d), 1)
     return torch.sqrt(torch.clamp(s, min=0.0))
 
 
@@ -161,8 +163,8 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
             sigma = torch.clamp(sigma, min=eps_t, max=max_sigma_t)
 
             for _ in range(max_iter):
-                model_price = bs_price(S=S_p, K=K_p, T=T_p, is_call=is_call_p, r=r_p, sigma=sigma)
-                vega = bs_vega(S=S_p, K=K_p, T=T_p, r=r_p, sigma=sigma).clamp_min(eps_t)
+                model_price = _bs_price_raw(S=S_p, K=K_p, T=T_p, is_call=is_call_p, r=r_p, sigma=sigma)
+                vega = _bs_vega_raw(S=S_p, K=K_p, T=T_p, r=r_p, sigma=sigma).clamp_min(eps_t)
                 step = (model_price - price_clamped) / vega
                 sigma = torch.clamp(sigma - step, min=eps_t, max=max_sigma_t)
                 if bool(torch.all(torch.abs(step) <= eps_t).item()):
@@ -184,7 +186,7 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
             )
 
         S, K, T, r, sigma = ctx.saved_tensors
-        dsigma_dprice = bs_implied_vol_proxy_dsigma_dprice(S=S, K=K, T=T, r=r, sigma=sigma)
+        dsigma_dprice = _bs_implied_vol_proxy_dsigma_dprice_raw(S=S, K=K, T=T, r=r, sigma=sigma)
         grad_price = grad_sigma * dsigma_dprice
 
         return grad_price, None, None, None, None, None, None, None, None

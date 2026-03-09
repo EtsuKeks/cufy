@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from src.abc.parameterized_model import ModelParam, ParameterizedModel
 from src.config.config import settings
-from src.utils.implied_vol import weighted_iv_l2_from_prices
+from src.utils.implied_vol import weighted_iv
 from src.utils.memory_probation import probe_param_batch_sizes
 from src.utils.torch_utils import Batch1D
 
@@ -107,7 +107,7 @@ class GridSearchModel(ParameterizedModel, ABC):
             for s in range(0, int(P.shape[0]), self._param_batch_size):
                 Pc = P[s : s + self._param_batch_size]
                 preds = self.prices_for_param_matrix(data=data, param_matrix=Pc)
-                out[s : s + self._param_batch_size] = weighted_iv_l2_from_prices(data=data, pred_prices=preds)
+                out[s : s + self._param_batch_size] = weighted_iv(data=data, pred_prices=preds)
         return out
 
     @property
@@ -135,7 +135,6 @@ class GridSearchModel(ParameterizedModel, ABC):
         p_dim = int(p_min.numel())
         self._history_size = self.gs.history_batches * self._param_batch_size
 
-        # Start a fresh history buffer for this exploration stage.
         self._hist_params = None
         self._hist_scores = None
 
@@ -203,7 +202,7 @@ class GridSearchModel(ParameterizedModel, ABC):
     ) -> None:
         if any(p.value is not None for p in self.params):
             raise RuntimeError(
-                "find_initial_params() cannot be called after parameter values were set. Use calibrate()."
+                "find_initial_params() cannot be called after parameter values were set. Use calibrate()"
             )
 
         d = settings.device

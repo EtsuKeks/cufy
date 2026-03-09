@@ -76,7 +76,7 @@ def bs_vega(*, data: Batch1D, sigma: torch.Tensor) -> torch.Tensor:
     return bs_vega_from_tensors(S=data.S_t, K=data.K_t, T=data.T_t, r=data.r_t, sigma=sigma)
 
 
-def bs_implied_vol_proxy_dsigma_dprice_from_tensors(
+def proxy_dsigma_dprice_from_tensors(
     *, S: torch.Tensor, K: torch.Tensor, T: torch.Tensor, r: torch.Tensor, sigma: torch.Tensor
 ) -> torch.Tensor:
     check_settings_tensors(S=S, K=K, T=T, r=r, sigma=sigma)
@@ -85,13 +85,10 @@ def bs_implied_vol_proxy_dsigma_dprice_from_tensors(
     return 1.0 / vega
 
 
-def bs_implied_vol_proxy_dsigma_dprice(*, data: Batch1D, sigma: torch.Tensor) -> torch.Tensor:
-    eps_t = torch.as_tensor(settings.ppl.epsilon, device=sigma.device, dtype=sigma.dtype)
-    vega = bs_vega(data=data, sigma=sigma).clamp_min(eps_t)
-    return 1.0 / vega
+def proxy_dsigma_dprice(*, data: Batch1D, sigma: torch.Tensor) -> torch.Tensor:
+    return proxy_dsigma_dprice_from_tensors(S=data.S_t, K=data.K_t, T=data.T_t, r=data.r_t, sigma=sigma)
 
-
-def implied_vol_newton_bs(
+def implied_vol_newton(
     *,
     price: torch.Tensor,
     data: Batch1D,
@@ -108,8 +105,8 @@ def implied_vol_newton_bs(
     )
 
 
-def weighted_iv_l2_from_prices(*, data: Batch1D, pred_prices: torch.Tensor) -> torch.Tensor:
-    pred_iv = implied_vol_newton_bs(price=pred_prices, data=data, sigma_init=data.close_IV_t)
+def weighted_iv(*, data: Batch1D, pred_prices: torch.Tensor) -> torch.Tensor:
+    pred_iv = implied_vol_newton(price=pred_prices, data=data, sigma_init=data.close_IV_t)
     d = pred_iv - data.close_IV_t[None, :]
     s = torch.sum(data.w_t[None, :] * (d * d), 1)
     return torch.sqrt(torch.clamp(s, min=0.0))
@@ -183,16 +180,16 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
 
         if any(ctx.needs_input_grad[i] for i in range(1, 7)):
             raise RuntimeError(
-                "implied_vol_newton_bs: gradients are only supported w.r.t. `price`. "
-                "Found a request for gradients w.r.t. other inputs."
+                "implied_vol_newton: gradients are only supported w.r.t. `price`. "
+                "Found a request for gradients w.r.t. other inputs"
             )
 
         S, K, T, r, sigma = ctx.saved_tensors
-        dsigma_dprice = bs_implied_vol_proxy_dsigma_dprice_from_tensors(S=S, K=K, T=T, r=r, sigma=sigma)
+        dsigma_dprice = proxy_dsigma_dprice_from_tensors(S=S, K=K, T=T, r=r, sigma=sigma)
         grad_price = grad_sigma * dsigma_dprice
 
         return grad_price, None, None, None, None, None, None, None, None
 
     @staticmethod
     def jvp(ctx, price_t, S_t, K_t, T_t, is_call_t, r_t, sigma_init_t, max_iter_t, max_sigma_t):
-        raise RuntimeError("implied_vol_newton_bs does not support forward-mode autodiff.")
+        raise RuntimeError("implied_vol_newton does not support forward-mode autodiff")

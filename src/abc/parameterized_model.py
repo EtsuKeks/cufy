@@ -56,7 +56,7 @@ class ParameterizedModel(Model, ABC):
                 raise ValueError(
                     f"Duplicate parameter.position values. "
                     f"Got {p._name} with {p.position} "
-                    f"when {positions[p.position]._name} with {positions[p.position].position} was already defined."
+                    f"when {positions[p.position]._name} with {positions[p.position].position} was already defined"
                 )
             positions[p.position] = p
         return params

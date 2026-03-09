@@ -78,6 +78,7 @@ class PuzirModel(GridSearchModel, ABC):
             hist_norm = (hist_p - p_min[None, :]) / p_range[None, :]
 
             score_min = torch.min(hist_s)
+            # Use temperature-scaled weights?
             weights = torch.exp(-(hist_s - score_min)).clamp_min(eps)
             idx = torch.multinomial(weights, num_samples=m, replacement=bool(int(hist_s.numel()) < m))
             base_scores = hist_s.index_select(0, idx)
@@ -108,7 +109,7 @@ class PuzirModel(GridSearchModel, ABC):
             if hist_n < k_min:
                 raise ValueError(
                     f"History too small for kNN covariance: need at least {k_min} points, got {hist_n}. "
-                    f"Increase self.gs.history_batches or initial exploration budget."
+                    f"Increase self.gs.history_batches or initial exploration budget"
                 )
             k = min(self.gs.neighbors_k, hist_n)
 

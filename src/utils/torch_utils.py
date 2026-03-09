@@ -43,6 +43,24 @@ class Batch1D:
     r_t: torch.Tensor
     w_t: torch.Tensor
 
+    def slice(self, n: int) -> "Batch1D":
+        return Batch1D(
+            S=self.S[:n],
+            K=self.K[:n],
+            T=self.T[:n],
+            is_call=self.is_call[:n],
+            close_IV=self.close_IV[:n],
+            r=self.r[:n],
+            w=self.w[:n],
+            S_t=self.S_t[:n],
+            K_t=self.K_t[:n],
+            T_t=self.T_t[:n],
+            is_call_t=self.is_call_t[:n],
+            close_IV_t=self.close_IV_t[:n],
+            r_t=self.r_t[:n],
+            w_t=self.w_t[:n],
+        )
+
     @staticmethod
     def from_numpy(
         *,

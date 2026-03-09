@@ -9,7 +9,7 @@ from src.abc.model import Model
 from src.abc.parameterized_model import ParameterizedModel
 from src.config.config import settings
 from src.utils.implied_vol import implied_vol_newton_bs
-from src.utils.torch_utils import inputs_1d
+from src.utils.torch_utils import Batch1D
 
 
 def split_df(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -134,7 +134,6 @@ class Runner(ABC):
 
         S, K, T, is_call, _, _ = split_df(df_f)
         r = self._resolve_r(df_f)
-        S_t, K_t, T_t, is_call_t, r_t = inputs_1d(S=S, K=K, T=T, is_call=is_call, r=r)
 
         def _assign_column(name: str, values: np.ndarray | object) -> None:
             if not to_filter:
@@ -161,7 +160,10 @@ class Runner(ABC):
 
             with torch.no_grad():
                 price_t = torch.as_tensor(pred, device=settings.device, dtype=settings.dtype).reshape(1, -1)
-                iv_t = implied_vol_newton_bs(price=price_t, S=S_t, K=K_t, T=T_t, is_call=is_call_t, r=r_t)[0]
+                dummy_w = np.ones_like(S, dtype=np.float64)
+                dummy_iv = np.zeros_like(S, dtype=np.float64)
+                batch = Batch1D.from_numpy(S=S, K=K, T=T, is_call=is_call, close_IV=dummy_iv, r=r, w=dummy_w)
+                iv_t = implied_vol_newton_bs(price=price_t, data=batch)[0]
                 iv = iv_t.detach().cpu().numpy()
 
             _assign_column(f"{tag}_price", pred)

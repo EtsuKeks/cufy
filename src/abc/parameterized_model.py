@@ -6,6 +6,7 @@ import torch
 from pydantic import BaseModel, PrivateAttr
 
 from src.abc.model import Model
+from src.utils.torch_utils import Batch1D
 
 
 class ModelParam(BaseModel):
@@ -23,16 +24,7 @@ class ParameterizedModel(Model, ABC):
         self._saved_facts: dict[str, dict[str, str]] = {}
 
     @abstractmethod
-    def prices_for_param_matrix(
-        self,
-        *,
-        S: torch.Tensor,
-        K: torch.Tensor,
-        T: torch.Tensor,
-        is_call: torch.Tensor,
-        param_matrix: torch.Tensor,
-        r: torch.Tensor,
-    ) -> torch.Tensor:
+    def prices_for_param_matrix(self, *, data: Batch1D, param_matrix: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
     def _collect_params(self, param_overrides: dict[str, ModelParam] | None) -> list[ModelParam]:

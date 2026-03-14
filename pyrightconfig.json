@@ -1,0 +1,16 @@
+{
+    "pythonPlatform": "Linux",
+    
+    "typeCheckingMode": "strict",
+    "include": ["cufy"],
+
+    "reportUnknownVariableType": "none",
+    "reportUnknownMemberType": "none",
+    "reportUnknownParameterType": "none",
+    "reportUnknownArgumentType": "none",
+    "reportUnknownLambdaType": "none",
+    "reportMissingTypeStubs": "none",
+    "reportMissingModuleSource": "none",
+    "reportUntypedFunctionDecorator": "none",
+    "reportUntypedBaseClass": "none"
+}

@@ -2,6 +2,14 @@
 
 A quantitative finance framework for option pricing and model calibration with GPU acceleration via PyTorch.
 
+## Current State
+
+**Backend:** PyTorch only. No JAX, no EvoJAX.
+
+**Device:** Single-device only. The framework assumes exclusive ownership of one GPU (or CPU). No multi-GPU, no distributed / cluster-wide execution.
+
+**Models:** Analytical closed-form models only. No neural network models, no Gaussian process approaches, no Monte Carlo / simulation-based pricing.
+
 ## Installation
 
 First, install PyTorch according to your hardware (CPU, CUDA, MPS) from the [official website](https://pytorch.org/get-started/locally/).
@@ -16,12 +24,8 @@ Then, install cufy:
 pip install cufy
 ```
 
-## Features
-- Option pricing (Black-Scholes, SABR)
-- GPU-accelerated model calibration (Gradient-based, Grid Search with LM and Puzir refinement)
-- Hyperparameter tuning via Optuna (TPE, CMA-ES, persistent study storage)
-- Backtesting engine
-
 ## Planned
-- **MLflow integration** — per-fold param/metric logging, vol surface artifacts, cross-fold aggregate metrics
-- **Optuna pruning** — shared explore phase across tuner trials (explore result is hyperparameter-independent), per-iteration pruning in refine phase (Puzir, LM, Gradient)
+- **MLflow integration** — per-fold param/metric logging, vol surface artifacts, aggregate metrics
+- **Structured logging** — replace `print` calls (e.g. `memory_probation`) with a proper logger so log level and output can be controlled at integration time
+- **Optuna pruning** — shared explore phase across tuner trials + per-iteration pruning in refine; requires splitting calibration into explore-only / refine-only phases
+- **Reduce CPU↔GPU transfers** — propagate `TorchOptionBatch` through `Runner` and engine so numpy↔tensor conversion happens once per fold rather than on every call

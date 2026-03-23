@@ -17,9 +17,7 @@ dependencies = [
     "numpy>=2.4.3",
     "pydantic>=2.12.5",
     "psutil>=7.2.2",
-    "pyarrow>=23.0.1",
-    "mlflow>=3.10.1",
-    "optuna>=4.7.0",
+    "optuna>=4.8.0",
 ]
 
 [tool.hatchling.build.targets.wheel]

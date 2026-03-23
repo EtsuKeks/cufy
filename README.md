@@ -28,10 +28,13 @@ pip install cufy
 
 ## Planned
 
-### Infrastructure
+### Backtesting
+- **Speculative backtest engine** — fold-by-fold calibration + pricing loop (`DataSource`, `FoldedDataSource`, `ConsecutiveFolds`); evaluate next-day IV fit across rolling windows
 - **MLflow integration** — per-fold param/metric logging, vol surface artifacts, aggregate metrics
-- **Structured logging** — replace `print` calls (e.g. `memory_probation`) with a proper logger so log level and output can be controlled at integration time
-- **Reduce CPU-GPU transfers** — propagate `TorchOptionBatch` through `Runner` and engine so numpy-tensor conversion happens once per fold rather than on every call
+- **Hedging backtest engine** — separate `backtest/hedging/` engine; requires fold philosophy change (fit today, evaluate over full TTM horizon)
+
+### Infrastructure
+- **Reduce CPU-GPU transfers** — propagate `TorchOptionBatch` through `Runner` so numpy-tensor conversion happens once per fold rather than on every call
 - **MPI / multi-GPU support** — distributed scoring and calibration across a GPU cluster via MPI
 
 ### Calibration
@@ -42,10 +45,14 @@ pip install cufy
 
 ### Models
 - **Heston model** — stochastic vol with mean reversion; analytical European pricing via characteristic function with logarithmic catch handling
+- **Merton jump-diffusion model** — lognormal jumps (Poisson arrival) on top of GBM; semi-analytical European pricing via infinite series; captures fat tails and short-term skew without stochastic vol
+- **Bates model** — Heston + Poisson jump diffusion; adds jump intensity, mean jump size and jump vol to capture short-term smile and crash risk
+- **Variance Gamma (VG)** — pure-jump Lévy process; three-parameter closed-form pricing via characteristic function; captures skew and excess kurtosis without stochastic vol
+- **Rough Heston / rough Bergomi** — fractional Brownian motion drives instantaneous vol; fits the observed term-structure of ATM skew that classical models cannot reproduce; pricing via Fourier inversion (rough Heston) or Monte Carlo (rough Bergomi)
 - **Hull-White analytical model** — interest rate model for discount curve fitting
 - **Historical fit for analytical models** — calibrate parameters that are identifiable from underlying price history (e.g. drift, vol-of-vol) directly from discounted underlying price series, reducing the degrees of freedom left to the options calibrator
 - **Gaussian process model** — non-parametric vol surface model; variant that takes predictions of analytical models as input features
 
 ### Contracts & hedging
 - **American and Asian contract support** — add `models/analytical/american/` and `models/analytical/asian/` with numerical pricers (LSM Monte Carlo, PDE, Turnbull-Wakeman approximation); make calibrator `score_fn` injectable so price-RMSE or contract-specific metrics can replace the default IV-RMSE
-- **Hedging backtest** — extend `Model` with optional Greeks (delta, vega, gamma); add a separate `backtest/hedging/` engine that recalibrates at each step, rebalances the hedging portfolio, and attributes P&L; requires a different data folding philosophy (fit today, evaluate over full TTM horizon)
+- **Hedging support** — extend `Model` with optional Greeks (delta, vega, gamma)

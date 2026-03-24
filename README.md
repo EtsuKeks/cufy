@@ -54,5 +54,5 @@ pip install cufy
 - **Gaussian process model** — non-parametric vol surface model; variant that takes predictions of analytical models as input features
 
 ### Contracts & hedging
-- **American and Asian contract support** — add `models/analytical/american/` and `models/analytical/asian/` with numerical pricers (LSM Monte Carlo, PDE, Turnbull-Wakeman approximation); make calibrator `score_fn` injectable so price-RMSE or contract-specific metrics can replace the default IV-RMSE
+- **American and Asian contract support** — add `models/analytical/american/` and `models/analytical/asian/` with numerical pricers (LSM Monte Carlo, PDE, Turnbull-Wakeman approximation); make calibrator `score_fn` injectable so price-RMSE or contract-specific metrics can replace the default IV-RMSE; for contracts where a single forward pass is expensive (Monte Carlo simulation), grid-search calibrators are wasteful — consider sequential Bayesian calibrators (Optuna GPSampler / CMA-ES via ask-tell) that minimise the number of forward evaluations
 - **Hedging support** — extend `Model` with optional Greeks (delta, vega, gamma)

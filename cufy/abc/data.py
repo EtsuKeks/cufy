@@ -58,11 +58,15 @@ class PreparedBatch(OptionBatch):
         if not np.isclose(np.sum(self.w), 1.0):
             raise ValueError(f"PreparedBatch.w must sum to 1.0, got {np.sum(self.w):.6f}")
 
+    @classmethod
+    def from_batch(cls, batch: OptionBatch, w: np.ndarray) -> PreparedBatch:
+        return cls(**{f.name: getattr(batch, f.name) for f in dataclasses.fields(batch)}, w=w)
+
 
 @dataclass(frozen=True, slots=True)
 class PricedBatch(PreparedBatch):
     price: np.ndarray = field(default_factory=lambda: np.array([]))
 
     @classmethod
-    def from_batch(cls, batch: PreparedBatch, price: np.ndarray) -> PricedBatch:
+    def from_prepared(cls, batch: PreparedBatch, price: np.ndarray) -> PricedBatch:
         return cls(**{f.name: getattr(batch, f.name) for f in dataclasses.fields(batch)}, price=price)

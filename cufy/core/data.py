@@ -24,6 +24,9 @@ class OptionBatch:
 
     def __post_init__(self) -> None:
         n = len(self.F)
+        if n == 0:
+            raise ValueError("OptionBatch must have at least one option")
+
         for f in dataclasses.fields(self):
             val = getattr(self, f.name)
             if f.name == "timestamp":

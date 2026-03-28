@@ -23,7 +23,9 @@ class OptionBatch:
     extras: dict[str, np.ndarray] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        n = len(self.F)
+        if self.F.ndim != 1:
+            raise ValueError(f"OptionBatch.F must be 1D, got shape {self.F.shape}")
+        n = self.F.shape[0]
         if n == 0:
             raise ValueError("OptionBatch must have at least one option")
 
@@ -36,8 +38,8 @@ class OptionBatch:
                     if arr.dtype != _CONFIG_NP_DTYPE:
                         raise ValueError(f"OptionBatch.extras[{key!r}] dtype {arr.dtype} does not match config dtype")
             else:
-                if len(val) != n:
-                    raise ValueError(f"OptionBatch.{f.name} must have length {n}, got {len(val)}")
+                if val.shape != (n,):
+                    raise ValueError(f"OptionBatch.{f.name} must have shape ({n},), got {val.shape}")
                 if f.name == "is_call":
                     if val.dtype != np.bool_:
                         raise ValueError(f"OptionBatch.{f.name} must have dtype bool, got {val.dtype}")

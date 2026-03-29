@@ -34,9 +34,9 @@ pip install cufy
 - **Hedging backtest engine** — separate `backtest/hedging/` engine; requires fold philosophy change (fit today, evaluate over full TTM horizon)
 
 ### Infrastructure
+- **Documentation and API exports** — write detailed docstrings with academic paper references (Hagan, Merton, Hull-White, Jamshidian, etc.) for all models and methods; populate `__init__.py` files across the project to expose clean and convenient public APIs
 - **Reduce CPU-GPU transfers** — propagate `TorchOptionBatch` through `Runner` so numpy-tensor conversion happens once per fold rather than on every call
 - **MPI / multi-GPU support** — distributed scoring and calibration across a GPU cluster via MPI
-- **Documentation and API exports** — write detailed docstrings with academic paper references (Hagan, Merton, Hull-White, Jamshidian, etc.) for all models and methods; populate `__init__.py` files across the project to expose clean and convenient public APIs
 
 ### Calibration
 - **Optuna pruning** — shared explore phase across tuner trials + per-iteration pruning in refine; requires splitting calibration into explore-only / refine-only phases
@@ -45,13 +45,13 @@ pip install cufy
 - **CPU-baseline calibrators** — add BS, SABR, Heston calibrators wrapping `fypy` to benchmark against existing CPU-based methods and demonstrate the GPU speedup
 
 ### Models
-- **Heston model** — stochastic vol with mean reversion; analytical European pricing via characteristic function with logarithmic catch handling
 - **SABR model** — NOTE: Currently uses unnormalized prices internally which can cause numerical instability (F*K explosion) for high-priced assets. Needs a robust solution to respect normalized prices while preserving the scale-dependent alpha parameter.
+- **Heston model** — stochastic vol with mean reversion; analytical European pricing via characteristic function with logarithmic catch handling
 - **Bates model** — Heston + Poisson jump diffusion; adds jump intensity, mean jump size and jump vol to capture short-term smile and crash risk
 - **Variance Gamma (VG)** — pure-jump Lévy process; three-parameter closed-form pricing via characteristic function; captures skew and excess kurtosis without stochastic vol
-- **Rough Heston / rough Bergomi** — fractional Brownian motion drives instantaneous vol; fits the observed term-structure of ATM skew that classical models cannot reproduce; pricing via Fourier inversion (rough Heston) or Monte Carlo (rough Bergomi)
-- **Historical fit for analytical models** — calibrate parameters that are identifiable from underlying price history (e.g. drift, vol-of-vol) directly from discounted underlying price series, reducing the degrees of freedom left to the options calibrator
 - **Gaussian process model** — non-parametric vol surface model; variant that takes predictions of analytical models as input features
+- **Analytical Jacobians & Gradients** — currently Jacobian (and potentially gradients) are vomputed via `torch.func.jacfwd` (forward-mode AD), which requires one forward pass per parameter. For models with known closed-form derivatives this is unnecessary overhead which should be reduced
+- **Historical fit for analytical models** — calibrate parameters that are identifiable from underlying price history (e.g. drift, vol-of-vol) directly from discounted underlying price series, reducing the degrees of freedom left to the options calibrator
 
 ### Contracts & hedging
 - **American and Asian contract support** — add `models/analytical/american/` and `models/analytical/asian/` with numerical pricers (LSM Monte Carlo, PDE, Turnbull-Wakeman approximation); make calibrator `score_fn` injectable so price-RMSE or contract-specific metrics can replace the default IV-RMSE; for contracts where a single forward pass is expensive (Monte Carlo simulation), grid-search calibrators are wasteful — consider sequential Bayesian calibrators (Optuna GPSampler / CMA-ES via ask-tell) that minimise the number of forward evaluations

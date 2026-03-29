@@ -1,3 +1,4 @@
+import logging
 from typing import cast
 
 import numpy as np
@@ -6,6 +7,8 @@ from torch.autograd.function import once_differentiable
 
 import cufy.backends.torch.config as config
 from cufy.backends.torch.utils.torch_utils import TorchPreparedBatch
+
+logger = logging.getLogger(__name__)
 
 
 def bs_price_from_tensors(
@@ -60,16 +63,10 @@ def bs_vega(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
     return _bs_vega_from_tensors(F=data.F_t, K=data.K_t, T=data.T_t, df=data.df_t, sigma=sigma)
 
 
-def _proxy_dsigma_dprice_from_tensors(
-    *, F: torch.Tensor, K: torch.Tensor, T: torch.Tensor, df: torch.Tensor, sigma: torch.Tensor
-) -> torch.Tensor:
-    eps_t = config.eps
-    vega = _bs_vega_from_tensors(F=F, K=K, T=T, df=df, sigma=sigma).clamp_min(eps_t)
-    return 1.0 / vega
-
-
 def proxy_dsigma_dprice(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
-    return _proxy_dsigma_dprice_from_tensors(F=data.F_t, K=data.K_t, T=data.T_t, df=data.df_t, sigma=sigma)
+    eps_t = config.eps
+    vega = _bs_vega_from_tensors(F=data.F_t, K=data.K_t, T=data.T_t, df=data.df_t, sigma=sigma).clamp_min(eps_t)
+    return 1.0 / vega
 
 
 def implied_vol_newton(
@@ -77,7 +74,7 @@ def implied_vol_newton(
     price: torch.Tensor,
     data: TorchPreparedBatch,
     sigma_init: torch.Tensor | None = None,
-    max_iter: int = 25,
+    max_iter: int = 15,
     max_sigma: float = 100.0,
 ) -> torch.Tensor:
     if max_iter < 1:
@@ -115,23 +112,18 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
     ) -> torch.Tensor:
         with torch.no_grad():
             price_p = price.detach()
-            F_p = F.detach()
-            K_p = K.detach()
-            T_p = T.detach()
-            is_call_p = is_call.detach()
-            df_p = df.detach()
+            F_b = F.detach()[None, :]
+            K_b = K.detach()[None, :]
+            T_b = T.detach()[None, :]
+            is_call_b = is_call.detach()[None, :]
+            df_b = df.detach()[None, :]
             eps_t = config.eps
             max_sigma_t = torch.as_tensor(max_sigma, device=config.device, dtype=config.dtype)
 
-            F_b = F_p[None, :]
-            K_b = K_p[None, :]
-            df_b = df_p[None, :]
-            is_call_b = is_call_p[None, :]
+            omega = torch.where(is_call_b, 1.0, -1.0)
 
-            lower_call = torch.clamp(df_b * (F_b - K_b), min=0.0)
-            lower_put = torch.clamp(df_b * (K_b - F_b), min=0.0)
-            lower = torch.where(is_call_b, lower_call, lower_put)
-            upper = torch.where(is_call_b, df_b * F_b, df_b * K_b)
+            lower = torch.clamp((F_b - K_b) * omega, min=0.0) * df_b
+            upper = torch.where(is_call_b, F_b, K_b) * df_b
 
             span = upper - lower
             mid = 0.5 * (lower + upper)
@@ -143,15 +135,44 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
                 sigma = torch.broadcast_to(sigma_init.detach(), price_clamped.shape).clone()
             sigma = torch.clamp(sigma, min=eps_t, max=max_sigma_t)
 
-            for _ in range(max_iter):
-                model_price = bs_price_from_tensors(F=F_p, K=K_p, T=T_p, is_call=is_call_p, df=df_p, sigma=sigma)
-                vega = _bs_vega_from_tensors(F=F_p, K=K_p, T=T_p, df=df_p, sigma=sigma).clamp_min(eps_t)
-                step = (model_price - price_clamped) / vega
-                sigma = torch.clamp(sigma - step, min=eps_t, max=max_sigma_t)
-                if bool(torch.all(torch.abs(step) <= eps_t).item()):
-                    break
+            T_safe = torch.clamp(T_b, min=eps_t)
+            sqrtT = torch.sqrt(T_safe)
+            logFK = torch.log(torch.clamp(F_b / K_b, min=eps_t))
+            vega_coeff = df_b * F_b * sqrtT / float(np.sqrt(2.0 * np.pi))
 
-        ctx.save_for_backward(F_p, K_p, T_p, df_p, sigma.detach())
+            omega_F = omega * F_b
+            omega_K = omega * K_b
+
+            converged_mask = torch.zeros_like(sigma, dtype=torch.bool)
+
+            for _ in range(max_iter):
+                sig_sqrtT = torch.clamp(sigma * sqrtT, min=eps_t)
+
+                d1 = (logFK + 0.5 * sigma * sigma * T_safe) / sig_sqrtT
+                d2 = d1 - sig_sqrtT
+
+                Nd1_omega = torch.special.ndtr(omega * d1)
+                Nd2_omega = torch.special.ndtr(omega * d2)
+
+                model_price = (omega_F * Nd1_omega - omega_K * Nd2_omega) * df_b
+
+                vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1 * d1), min=eps_t)
+
+                step = (model_price - price_clamped) / vega
+
+                converged_mask = torch.abs(step) <= eps_t
+                step = torch.where(converged_mask, 0.0, step)
+
+                sigma = torch.clamp(sigma - step, min=eps_t, max=max_sigma_t)
+
+            not_converged = ~converged_mask
+            if not_converged.any():
+                logger.warning(
+                    f"Newton method did not converge for {not_converged.sum().item()}"
+                    f" out of {not_converged.numel()} options"
+                )
+
+        ctx.save_for_backward(logFK, sqrtT, T_safe, vega_coeff, sigma.detach())
         return sigma
 
     @staticmethod
@@ -166,9 +187,16 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
                 "Found a request for gradients w.r.t. other inputs"
             )
 
-        F, K, T, df, sigma = ctx.saved_tensors  # type: ignore[attr-defined]
-        dsigma_dprice = _proxy_dsigma_dprice_from_tensors(F=F, K=K, T=T, df=df, sigma=sigma)
-        grad_price = grad_sigma * dsigma_dprice
+        logFK, sqrtT, T_safe, vega_coeff, sigma = ctx.saved_tensors  # type: ignore[attr-defined]
+        eps_t = config.eps
+
+        sig = torch.clamp(sigma, min=eps_t)
+        sig_sqrtT = torch.clamp(sig * sqrtT, min=eps_t)
+
+        d1 = (logFK + 0.5 * sig * sig * T_safe) / sig_sqrtT
+        vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1 * d1), min=eps_t)
+
+        grad_price = grad_sigma / vega
 
         return grad_price, None, None, None, None, None, None, None, None
 

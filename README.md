@@ -36,6 +36,7 @@ pip install cufy
 ### Infrastructure
 - **Reduce CPU-GPU transfers** — propagate `TorchOptionBatch` through `Runner` so numpy-tensor conversion happens once per fold rather than on every call
 - **MPI / multi-GPU support** — distributed scoring and calibration across a GPU cluster via MPI
+- **Documentation and API exports** — write detailed docstrings with academic paper references (Hagan, Merton, Hull-White, Jamshidian, etc.) for all models and methods; populate `__init__.py` files across the project to expose clean and convenient public APIs
 
 ### Calibration
 - **Optuna pruning** — shared explore phase across tuner trials + per-iteration pruning in refine; requires splitting calibration into explore-only / refine-only phases
@@ -45,12 +46,10 @@ pip install cufy
 
 ### Models
 - **Heston model** — stochastic vol with mean reversion; analytical European pricing via characteristic function with logarithmic catch handling
-- **Merton jump-diffusion model** — lognormal jumps (Poisson arrival) on top of GBM; semi-analytical European pricing via infinite series; captures fat tails and short-term skew without stochastic vol
 - **SABR model** — NOTE: Currently uses unnormalized prices internally which can cause numerical instability (F*K explosion) for high-priced assets. Needs a robust solution to respect normalized prices while preserving the scale-dependent alpha parameter.
 - **Bates model** — Heston + Poisson jump diffusion; adds jump intensity, mean jump size and jump vol to capture short-term smile and crash risk
 - **Variance Gamma (VG)** — pure-jump Lévy process; three-parameter closed-form pricing via characteristic function; captures skew and excess kurtosis without stochastic vol
 - **Rough Heston / rough Bergomi** — fractional Brownian motion drives instantaneous vol; fits the observed term-structure of ATM skew that classical models cannot reproduce; pricing via Fourier inversion (rough Heston) or Monte Carlo (rough Bergomi)
-- **Hull-White analytical model** — interest rate model for discount curve fitting
 - **Historical fit for analytical models** — calibrate parameters that are identifiable from underlying price history (e.g. drift, vol-of-vol) directly from discounted underlying price series, reducing the degrees of freedom left to the options calibrator
 - **Gaussian process model** — non-parametric vol surface model; variant that takes predictions of analytical models as input features
 

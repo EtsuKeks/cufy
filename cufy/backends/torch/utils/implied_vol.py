@@ -8,7 +8,7 @@ import cufy.backends.torch.config as config
 from cufy.backends.torch.utils.torch_utils import TorchPreparedBatch
 
 
-def _bs_price_from_tensors(
+def bs_price_from_tensors(
     *, F: torch.Tensor, K: torch.Tensor, T: torch.Tensor, is_call: torch.Tensor, df: torch.Tensor, sigma: torch.Tensor
 ) -> torch.Tensor:
     eps_t = config.eps
@@ -34,7 +34,7 @@ def _bs_price_from_tensors(
 
 
 def bs_price(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
-    return _bs_price_from_tensors(F=data.F_t, K=data.K_t, T=data.T_t, is_call=data.is_call_t, df=data.df_t, sigma=sigma)
+    return bs_price_from_tensors(F=data.F_t, K=data.K_t, T=data.T_t, is_call=data.is_call_t, df=data.df_t, sigma=sigma)
 
 
 def _bs_vega_from_tensors(
@@ -144,7 +144,7 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
             sigma = torch.clamp(sigma, min=eps_t, max=max_sigma_t)
 
             for _ in range(max_iter):
-                model_price = _bs_price_from_tensors(F=F_p, K=K_p, T=T_p, is_call=is_call_p, df=df_p, sigma=sigma)
+                model_price = bs_price_from_tensors(F=F_p, K=K_p, T=T_p, is_call=is_call_p, df=df_p, sigma=sigma)
                 vega = _bs_vega_from_tensors(F=F_p, K=K_p, T=T_p, df=df_p, sigma=sigma).clamp_min(eps_t)
                 step = (model_price - price_clamped) / vega
                 sigma = torch.clamp(sigma - step, min=eps_t, max=max_sigma_t)

@@ -113,9 +113,9 @@ def probe_param_batch_sizes(
             break
         samples.append((m, n, peak))
 
-    if len(samples) < 2:
+    if len(samples) < 4:
         logger.warning(
-            f"memory probe collected only {len(samples)} sample(s) before OOM (need at least 2 to fit the model)."
+            f"memory probe collected only {len(samples)} sample(s) before OOM (need at least 4 to fit the model)."
             f"Falling back to param_batch_size=1."
         )
         return lambda _n: 1

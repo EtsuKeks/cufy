@@ -183,46 +183,57 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
         self._history_size = max(1, int(self._checked_search_points * self.cfg.history_points_fraction))
 
     def _score_params(self, P: torch.Tensor, data: TorchPreparedBatch) -> torch.Tensor:
-        d = config.device
-        bs = self._checked_param_batch_size
-        out = torch.empty((int(P.shape[0]),), device=d, dtype=config.dtype)
         with torch.no_grad():
-            for s in range(0, int(P.shape[0]), bs):
-                preds = self.model.prices_for_param_matrix(data=data, param_matrix=P[s : s + bs])
-                out[s : s + bs] = weighted_iv(data=data, pred_prices=preds).detach()
+            preds = self.model.prices_for_param_matrix(data=data, param_matrix=P)
+            out = weighted_iv(data=data, pred_prices=preds).detach()
         return out
 
     def _history_merge(self, params: torch.Tensor, scores: torch.Tensor) -> None:
         K = self._checked_history_size
         all_scores = torch.cat([self._hist_scores, scores])
         all_params = torch.cat([self._hist_params, params])
-        idx = torch.topk(all_scores, k=min(K, int(all_scores.numel())), largest=False, sorted=True).indices
-        self._hist_scores = all_scores[idx]
-        self._hist_params = all_params[idx]
+        if all_scores.numel() <= K:
+            self._hist_scores = all_scores
+            self._hist_params = all_params
+        else:
+            idx = torch.topk(all_scores, k=K, largest=False, sorted=False).indices
+            self._hist_scores = all_scores[idx]
+            self._hist_params = all_params[idx]
 
     def _explore(self, *, p_min: torch.Tensor, p_max: torch.Tensor, data: TorchPreparedBatch) -> None:
         d = config.device
         p_dim = int(p_min.numel())
+        N = self._checked_search_points
+        bs = self._checked_param_batch_size
 
-        self._hist_params = torch.empty(0, device=config.device, dtype=config.dtype)
-        self._hist_scores = torch.empty(0, device=config.device, dtype=config.dtype)
+        self._hist_params = torch.empty(0, device=d, dtype=config.dtype)
+        self._hist_scores = torch.empty(0, device=d, dtype=config.dtype)
 
         if self.cfg.initial_sampler == "sobol":
             engine = torch.quasirandom.SobolEngine(dimension=p_dim, scramble=True)
-            U = engine.draw(self._checked_search_points).to(device=d, dtype=config.dtype)
-            candidates = (p_min[None, :] + U * (p_max - p_min)[None, :]).clamp(min=p_min, max=p_max)
+            for s in range(0, N, bs):
+                U = engine.draw(min(bs, N - s)).to(device=d, dtype=config.dtype)
+                candidates = (p_min[None, :] + U * (p_max - p_min)[None, :]).clamp(min=p_min, max=p_max)
+                scores = self._score_params(candidates, data)
+                self._history_merge(candidates, scores)
         else:
-            edges = [
-                torch.linspace(
-                    p_min[i].item(), p_max[i].item(), self._search_points_detailed[i], device=d, dtype=config.dtype
+            dims = torch.tensor(self._search_points_detailed, device=d, dtype=torch.long)
+            steps = (p_max - p_min) / (dims - 1).clamp(min=1).to(config.dtype)
+            for s in range(0, N, bs):
+                flat_indices = torch.arange(s, s + min(bs, N - s), device=d, dtype=torch.long)
+                rem = flat_indices
+                multi_indices = []
+                for i in range(p_dim - 1, -1, -1):
+                    multi_indices.append(rem % dims[i])
+                    rem = rem // dims[i]
+                multi_indices = multi_indices[::-1]
+                candidates = torch.stack(
+                    [p_min[i] + multi_indices[i].to(config.dtype) * steps[i] for i in range(p_dim)], dim=1
                 )
-                for i in range(p_dim)
-            ]
-            candidates = torch.stack([g.flatten() for g in torch.meshgrid(*edges, indexing="ij")], dim=1)
+                scores = self._score_params(candidates, data)
+                self._history_merge(candidates, scores)
 
-        scores = self._score_params(candidates, data)
-        self._history_merge(candidates, scores)
-        best_p = self._hist_params[0]
+        best_p = self._hist_params[torch.argmin(self._hist_scores)]
         for i, p in enumerate(self.model.params):
             p.value = float(best_p[i].item())
 

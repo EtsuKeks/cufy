@@ -1,7 +1,7 @@
 import copy
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -19,15 +19,15 @@ from cufy.core.tuner import TunableCalibrator
 
 @dataclass
 class GridSearchConfig:
-    initial_sampler: Literal["grid", "sobol"] = "sobol"
-    initial_points: int | None = None
-    calibrate_points_fraction: float | None = None
-    history_points_fraction: float = 0.1
-    available_memory_fraction: float = 0.85
-    probe_max_candidates_fraction: float = 0.1
-    calibrate_radii: dict[str, float] = field(default_factory=dict)
-    grid_points_initial: dict[str, int] = field(default_factory=dict)
-    grid_points_calibrate: dict[str, int] = field(default_factory=dict)
+    initial_sampler: Literal["grid", "sobol"]
+    initial_points: int | None
+    calibrate_points_fraction: float | None
+    history_points_fraction: float
+    available_memory_fraction: float
+    probe_max_candidates_fraction: float
+    calibrate_radii: dict[str, float]
+    grid_points_initial: dict[str, int]
+    grid_points_calibrate: dict[str, int]
 
     def __post_init__(self) -> None:
         if self.initial_points is not None and self.initial_points < 1:
@@ -43,9 +43,9 @@ class GridSearchConfig:
 
 
 class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
-    def __init__(self, model: TorchParameterizedModel, cfg: GridSearchConfig | None = None):
+    def __init__(self, model: TorchParameterizedModel, cfg: GridSearchConfig):
         super().__init__(model)
-        self.cfg = cfg or GridSearchConfig()
+        self.cfg = cfg
 
         param_names = {p.name for p in model.params}
         radii = self.cfg.calibrate_radii

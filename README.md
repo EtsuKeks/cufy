@@ -4,6 +4,8 @@ A quantitative finance framework for option pricing and model calibration with G
 
 ## Current State
 
+**Calibration Philosophy:** Currently, the framework is strictly focused on **time-series calibration** for predictive tasks (Alpha Signal Evaluation). To ensure stability, prevent overfitting, and maintain the physical meaning of parameters across time, we avoid fitting state variables (like $v_0$ in Heston/Bates) as free parameters. Instead, we derive them directly from market observables (e.g., using $\sigma_{ATM}$ as a deterministic proxy).
+
 **Backend:** PyTorch only. No JAX, no EvoJAX.
 
 **Device:** Single-device only. The framework assumes exclusive ownership of one GPU (or CPU). No multi-GPU, no distributed / cluster-wide execution.
@@ -31,10 +33,10 @@ pip install cufy
 ### Backtesting
 - **Speculative backtest engine** — fold-by-fold calibration + pricing loop (`DataSource`, `FoldedDataSource`, `ConsecutiveFolds`); evaluate next-day IV fit across rolling windows
 - **MLflow integration** — per-fold param/metric logging, vol surface artifacts, aggregate metrics
-- **Hedging backtest engine** — separate `backtest/hedging/` engine; requires fold philosophy change (fit today, evaluate over full TTM horizon)
+- **Hedging backtest engine** — separate `backtest/hedging/` engine; requires fold philosophy change (fit today, evaluate over full TTM horizon), new models added (convenient for hedging purposes)
 
 ### Infrastructure
-- **Documentation and API exports** — write detailed docstrings with academic paper references (Hagan, Merton, Hull-White, Jamshidian, etc.) for all models and methods; populate `__init__.py` files across the project to expose clean and convenient public APIs
+- **Documentation and API exports** — write detailed docstrings with academic paper references (Hagan, Merton Bates, etc.) for all models and methods; populate `__init__.py` files across the project to expose clean and convenient public APIs
 - **Reduce CPU-GPU transfers** — propagate `TorchOptionBatch` through `Runner` so numpy-tensor conversion happens once per fold rather than on every call
 - **MPI / multi-GPU support** — distributed scoring and calibration across a GPU cluster via MPI
 
@@ -45,10 +47,10 @@ pip install cufy
 - **CPU-baseline calibrators** — add BS, SABR, Heston calibrators wrapping `fypy` to benchmark against existing CPU-based methods and demonstrate the GPU speedup
 
 ### Models
-- **SABR model** — NOTE: Currently uses unnormalized prices internally which can cause numerical instability (F*K explosion) for high-priced assets. Needs a robust solution to respect normalized prices while preserving the scale-dependent alpha parameter.
-- **Heston model** — stochastic vol with mean reversion; analytical European pricing via characteristic function with logarithmic catch handling
-- **Bates model** — Heston + Poisson jump diffusion; adds jump intensity, mean jump size and jump vol to capture short-term smile and crash risk
 - **Variance Gamma (VG)** — pure-jump Lévy process; three-parameter closed-form pricing via characteristic function; captures skew and excess kurtosis without stochastic vol
+- **Rough Volatility (Rough Heston / rBergomi)** — cutting-edge models driven by fractional Brownian motion. Perfectly captures the power-law explosion of ATM skew at short maturities, which is critical for highly volatile crypto markets.
+- **Path-Dependent Volatility (PDV / Guyon-Lipton)** — advanced frontier models that construct the instantaneous volatility surface directly from the historical path of the underlying asset, completely eliminating the need for unobservable state variables.
+- **Neural SDEs / Neural Stochastic Volatility** — hybrid frontier models that use neural networks to learn the drift and diffusion coefficients of the volatility process directly from panel data, bridging the gap between rigorous analytical SDEs and deep learning.
 - **Gaussian process model** — non-parametric vol surface model; variant that takes predictions of analytical models as input features
 - **Analytical Jacobians & Gradients** — currently Jacobian (and potentially gradients) are vomputed via `torch.func.jacfwd` (forward-mode AD), which requires one forward pass per parameter. For models with known closed-form derivatives this is unnecessary overhead which should be reduced
 - **Historical fit for analytical models** — calibrate parameters that are identifiable from underlying price history (e.g. drift, vol-of-vol) directly from discounted underlying price series, reducing the degrees of freedom left to the options calibrator

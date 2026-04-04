@@ -41,6 +41,7 @@ pip install cufy
 - **MPI / multi-GPU support** — distributed scoring and calibration across a GPU cluster via MPI
 
 ### Calibration
+- **Target Abstraction** — currently, calibrators hardcode `weighted_iv` as the loss function. This needs to be abstracted so models can be calibrated directly on prices or other metrics. Crucially, the target must support both scalar scoring (for black-box optimizers like Puzir/EvoSax) and residual vector generation (for gradient-based methods like Levenberg-Marquardt).
 - **Optuna pruning** — shared explore phase across tuner trials + per-iteration pruning in refine; requires splitting calibration into explore-only / refine-only phases
 - **JAX Migration** — port the core framework and pricing models to a JAX backend to fully utilize XLA compilation and unify the codebase. This will eliminate the `backends/torch` abstraction layer entirely, promoting JAX arrays to the `core` level. Consequently, the "CPU-GPU transfers" bottleneck will disappear, as data will reside natively on the device from the start. That is, core abstractions will utilize JAX arrays instead of numpy, with only weight functionality left, filtering will be removed and **become a part of DataSource contract**.
 - **Natural NES+EDA hybrid** — run multiple NES trials simultaneously, partitioned into K clusters for population-level diversity

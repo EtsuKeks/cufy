@@ -6,7 +6,7 @@ A quantitative finance framework for option pricing and model calibration with G
 
 **Calibration Philosophy:** Currently, the framework is strictly focused on **time-series calibration** for predictive tasks (Alpha Signal Evaluation). To ensure stability, prevent overfitting, and maintain the physical meaning of parameters across time, we avoid fitting state variables (like $v_0$ in Heston/Bates) as free parameters. Instead, we derive them directly from market observables (e.g., using $\sigma_{ATM}$ as a deterministic proxy).
 
-**Backend:** PyTorch only. No JAX, no EvoJAX.
+**Backend:** PyTorch only for modeling and pricing, JAX for evolutionary calibration (EvoSAX).
 
 **Device:** Single-device only. The framework assumes exclusive ownership of one GPU (or CPU). No multi-GPU, no distributed / cluster-wide execution.
 
@@ -42,7 +42,7 @@ pip install cufy
 
 ### Calibration
 - **Optuna pruning** — shared explore phase across tuner trials + per-iteration pruning in refine; requires splitting calibration into explore-only / refine-only phases
-- **EvoSAX calibration** — port the framework to a JAX backend and add EvoSAX-based calibrators (NES, CMA-ES) for rigorous comparison against the PyTorch grid-search methods
+- **JAX Migration** — port the core framework and pricing models to a JAX backend to fully utilize XLA compilation and unify the codebase.
 - **Natural NES+EDA hybrid** — run multiple NES trials simultaneously, partitioned into K clusters for population-level diversity
 - **CPU-baseline calibrators** — add BS, SABR, Heston calibrators wrapping `fypy` to benchmark against existing CPU-based methods and demonstrate the GPU speedup
 

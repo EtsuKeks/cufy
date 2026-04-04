@@ -42,7 +42,7 @@ pip install cufy
 
 ### Calibration
 - **Optuna pruning** — shared explore phase across tuner trials + per-iteration pruning in refine; requires splitting calibration into explore-only / refine-only phases
-- **JAX Migration** — port the core framework and pricing models to a JAX backend to fully utilize XLA compilation and unify the codebase.
+- **JAX Migration** — port the core framework and pricing models to a JAX backend to fully utilize XLA compilation and unify the codebase. This will eliminate the `backends/torch` abstraction layer entirely, promoting JAX arrays to the `core` level. Consequently, the "CPU-GPU transfers" bottleneck will disappear, as data will reside natively on the device from the start.
 - **Natural NES+EDA hybrid** — run multiple NES trials simultaneously, partitioned into K clusters for population-level diversity
 - **CPU-baseline calibrators** — add BS, SABR, Heston calibrators wrapping `fypy` to benchmark against existing CPU-based methods and demonstrate the GPU speedup
 

@@ -1,7 +1,7 @@
 import logging
+import math
 from typing import cast
 
-import numpy as np
 import torch
 from torch.autograd.function import once_differentiable
 
@@ -9,6 +9,8 @@ import cufy.backends.torch.config as config
 from cufy.backends.torch.utils.torch_utils import TorchPreparedBatch
 
 logger = logging.getLogger(__name__)
+
+_INV_SQRT_2PI = 1.0 / math.sqrt(2.0 * math.pi)
 
 
 def bs_price_from_tensors(
@@ -27,13 +29,11 @@ def bs_price_from_tensors(
     d1 = (logFK + half_varT) / sig_sqrtT
     d2 = d1 - sig_sqrtT
 
-    Nd1 = torch.special.ndtr(d1)
-    Nd2 = torch.special.ndtr(d2)
-    call = F_b * Nd1 - K_b * Nd2
-    put = K_b * (1.0 - Nd2) - F_b * (1.0 - Nd1)
+    omega = torch.where(is_call_b, 1.0, -1.0)
+    Nd1_omega = torch.special.ndtr(omega * d1)
+    Nd2_omega = torch.special.ndtr(omega * d2)
 
-    res = torch.where(is_call_b, call, put)
-    return df_b * res
+    return (omega * F_b * Nd1_omega - omega * K_b * Nd2_omega) * df_b
 
 
 def bs_price(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
@@ -55,7 +55,7 @@ def _bs_vega_from_tensors(
     half_varT = 0.5 * sig * sig * T_safe
     d1 = (logFK + half_varT) / sig_sqrtT
 
-    pdf_d1 = torch.exp(-0.5 * d1 * d1) / float(np.sqrt(2.0 * np.pi))
+    pdf_d1 = torch.exp(-0.5 * d1 * d1) * _INV_SQRT_2PI
     return df_b * F_b * pdf_d1 * sqrtT
 
 
@@ -132,13 +132,13 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
             if sigma_init is None:
                 sigma = torch.full_like(price_clamped, 0.5)
             else:
-                sigma = torch.broadcast_to(sigma_init.detach(), price_clamped.shape).clone()
+                sigma = torch.broadcast_to(sigma_init.detach(), price_clamped.shape)
             sigma = torch.clamp(sigma, min=eps_t, max=max_sigma_t)
 
             T_safe = torch.clamp(T_b, min=eps_t)
             sqrtT = torch.sqrt(T_safe)
             logFK = torch.log(torch.clamp(F_b / K_b, min=eps_t))
-            vega_coeff = df_b * F_b * sqrtT / float(np.sqrt(2.0 * np.pi))
+            vega_coeff = df_b * F_b * sqrtT * _INV_SQRT_2PI
 
             omega_F = omega * F_b
             omega_K = omega * K_b
@@ -166,7 +166,7 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
                 sigma = torch.clamp(sigma - step, min=eps_t, max=max_sigma_t)
 
             not_converged = ~converged_mask
-            if not_converged.any():
+            if not_converged.any().item():
                 logger.warning(
                     f"Newton method did not converge for {not_converged.sum().item()}"
                     f" out of {not_converged.numel()} options"

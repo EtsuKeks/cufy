@@ -36,22 +36,28 @@ class TorchPreparedBatch:
         if self._token is not _SENTINEL:
             raise TypeError("TorchPreparedBatch cannot be instantiated directly — use TorchPreparedBatch.from_batch()")
 
-    def slice(self, n: int) -> TorchPreparedBatch:
+    def slice(self, n: int, clone: bool = False) -> TorchPreparedBatch:
         length = int(self.F_t.shape[0])
         if n <= 0 or n > length:
             raise ValueError(f"n must be in [1, {length}], got {n}")
+
+        def _s(t: torch.Tensor) -> torch.Tensor:
+            return t[:n].clone() if clone else t[:n]
+
         return TorchPreparedBatch(
             timestamp=self.timestamp,
-            F_scale_t=self.F_scale_t[:n],
-            F_t=self.F_t[:n],
-            K_t=self.K_t[:n],
-            T_t=self.T_t[:n],
-            is_call_t=self.is_call_t[:n],
-            close_t=self.close_t[:n],
-            close_IV_t=self.close_IV_t[:n],
-            df_t=self.df_t[:n],
-            extras_t={k: v[:n] if v.shape[0] == length else v for k, v in self.extras_t.items()},
-            w_t=self.w_t[:n],
+            F_scale_t=_s(self.F_scale_t),
+            F_t=_s(self.F_t),
+            K_t=_s(self.K_t),
+            T_t=_s(self.T_t),
+            is_call_t=_s(self.is_call_t),
+            close_t=_s(self.close_t),
+            close_IV_t=_s(self.close_IV_t),
+            df_t=_s(self.df_t),
+            extras_t={
+                k: _s(v) if v.shape[0] == length else (v.clone() if clone else v) for k, v in self.extras_t.items()
+            },
+            w_t=_s(self.w_t),
             _token=_SENTINEL,
         )
 
@@ -64,7 +70,7 @@ class TorchPreparedBatch:
             F_t=torch.ones_like(F_scale),
             K_t=to_torch_1d(batch.K) / F_scale,
             T_t=to_torch_1d(batch.T),
-            is_call_t=torch.from_numpy(batch.is_call).to(device=config.device),
+            is_call_t=torch.from_numpy(batch.is_call).to(device=config.device, dtype=torch.bool),
             close_t=to_torch_1d(batch.close) / F_scale,
             close_IV_t=to_torch_1d(batch.close_IV),
             df_t=to_torch_1d(batch.df),

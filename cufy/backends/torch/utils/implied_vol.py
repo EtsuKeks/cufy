@@ -21,19 +21,25 @@ def bs_price_from_tensors(
 
     T_safe = torch.clamp(T_b, min=eps_t)
     sqrtT = torch.sqrt(T_safe)
-    sig = torch.clamp(sigma, min=eps_t)
-    sig_sqrtT = torch.clamp(sig * sqrtT, min=eps_t)
-
     logFK = torch.log(torch.clamp(F_b / K_b, min=eps_t))
-    half_varT = 0.5 * sig * sig * T_safe
-    d1 = (logFK + half_varT) / sig_sqrtT
-    d2 = d1 - sig_sqrtT
+    C1 = logFK / sqrtT
+    C2 = 0.5 * sqrtT
+
+    sig = torch.clamp(sigma, min=eps_t)
+    term1 = C1 / sig
+    term2 = C2 * sig
+
+    d1 = term1 + term2
+    d2 = term1 - term2
 
     omega = torch.where(is_call_b, 1.0, -1.0)
     Nd1_omega = torch.special.ndtr(omega * d1)
     Nd2_omega = torch.special.ndtr(omega * d2)
 
-    return (omega * F_b * Nd1_omega - omega * K_b * Nd2_omega) * df_b
+    df_omega_F = df_b * omega * F_b
+    df_omega_K = df_b * omega * K_b
+
+    return df_omega_F * Nd1_omega - df_omega_K * Nd2_omega
 
 
 def bs_price(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
@@ -48,15 +54,15 @@ def _bs_vega_from_tensors(
 
     T_safe = torch.clamp(T_b, min=eps_t)
     sqrtT = torch.sqrt(T_safe)
-    sig = torch.clamp(sigma, min=eps_t)
-    sig_sqrtT = torch.clamp(sig * sqrtT, min=eps_t)
-
     logFK = torch.log(torch.clamp(F_b / K_b, min=eps_t))
-    half_varT = 0.5 * sig * sig * T_safe
-    d1 = (logFK + half_varT) / sig_sqrtT
+    C1 = logFK / sqrtT
+    C2 = 0.5 * sqrtT
 
-    pdf_d1 = torch.exp(-0.5 * d1 * d1) * _INV_SQRT_2PI
-    return df_b * F_b * pdf_d1 * sqrtT
+    sig = torch.clamp(sigma, min=eps_t)
+    d1 = C1 / sig + C2 * sig
+
+    vega_coeff = df_b * F_b * sqrtT * _INV_SQRT_2PI
+    return vega_coeff * torch.exp(-0.5 * d1 * d1)
 
 
 def bs_vega(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
@@ -138,31 +144,31 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
             T_safe = torch.clamp(T_b, min=eps_t)
             sqrtT = torch.sqrt(T_safe)
             logFK = torch.log(torch.clamp(F_b / K_b, min=eps_t))
+
+            C1 = logFK / sqrtT
+            C2 = 0.5 * sqrtT
             vega_coeff = df_b * F_b * sqrtT * _INV_SQRT_2PI
 
-            omega_F = omega * F_b
-            omega_K = omega * K_b
+            omega_F_df = omega * F_b * df_b
+            omega_K_df = omega * K_b * df_b
 
             converged_mask = torch.zeros_like(sigma, dtype=torch.bool)
-
             for _ in range(max_iter):
-                sig_sqrtT = torch.clamp(sigma * sqrtT, min=eps_t)
+                term1 = C1 / sigma
+                term2 = C2 * sigma
 
-                d1 = (logFK + 0.5 * sigma * sigma * T_safe) / sig_sqrtT
-                d2 = d1 - sig_sqrtT
+                d1 = term1 + term2
+                d2 = term1 - term2
 
                 Nd1_omega = torch.special.ndtr(omega * d1)
                 Nd2_omega = torch.special.ndtr(omega * d2)
 
-                model_price = (omega_F * Nd1_omega - omega_K * Nd2_omega) * df_b
-
+                model_price = omega_F_df * Nd1_omega - omega_K_df * Nd2_omega
                 vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1 * d1), min=eps_t)
-
                 step = (model_price - price_clamped) / vega
 
                 converged_mask = torch.abs(step) <= eps_t
                 step = torch.where(converged_mask, 0.0, step)
-
                 sigma = torch.clamp(sigma - step, min=eps_t, max=max_sigma_t)
 
             not_converged = ~converged_mask
@@ -172,7 +178,7 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
                     f" out of {not_converged.numel()} options"
                 )
 
-        ctx.save_for_backward(logFK, sqrtT, T_safe, vega_coeff, sigma.detach())
+        ctx.save_for_backward(C1, C2, vega_coeff, sigma.detach())
         return sigma
 
     @staticmethod
@@ -187,17 +193,13 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
                 "Found a request for gradients w.r.t. other inputs"
             )
 
-        logFK, sqrtT, T_safe, vega_coeff, sigma = ctx.saved_tensors  # type: ignore[attr-defined]
+        C1, C2, vega_coeff, sigma = ctx.saved_tensors  # type: ignore[attr-defined]
         eps_t = config.eps
 
         sig = torch.clamp(sigma, min=eps_t)
-        sig_sqrtT = torch.clamp(sig * sqrtT, min=eps_t)
-
-        d1 = (logFK + 0.5 * sig * sig * T_safe) / sig_sqrtT
+        d1 = C1 / sig + C2 * sig
         vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1 * d1), min=eps_t)
-
         grad_price = grad_sigma / vega
-
         return grad_price, None, None, None, None, None, None, None, None
 
     @staticmethod

@@ -31,31 +31,30 @@ pip install cufy
 ## Planned
 
 ### Backtesting
-- **Speculative backtest engine** — fold-by-fold calibration + pricing loop (`DataSource`, `FoldedDataSource`, `ConsecutiveFolds`); evaluate next-day IV fit across rolling windows
-- **MLflow integration** — per-fold param/metric logging, vol surface artifacts, aggregate metrics
-- **Hedging backtest engine** — separate `backtest/hedging/` engine; requires fold philosophy change (fit today, evaluate over full TTM horizon), new models added (convenient for hedging purposes)
+- **Speculative backtest engine** — fold-by-fold calibration + pricing loop; possibly synthetic dealing
+- **MLflow integration** — param/metric logging, vol surface artifacts, aggregate metrics
+- **Hedging backtest engine** — separate hedging engine; requires fold philosophy change (fit today, evaluate over full TTM horizon), new models added (convenient for hedging purposes)
 
 ### Infrastructure
-- **Documentation and API exports** — write detailed docstrings with academic paper references (Hagan, Merton Bates, etc.) for all models and methods; populate `__init__.py` files across the project to expose clean and convenient public APIs
+- **Documentation and API exports** — write detailed docstrings with academic paper references (Hagan, Merton Bates, etc.) for all models and methods; populate init files across the project to expose clean and convenient public APIs
 - **Reduce CPU-GPU transfers** — propagate `TorchOptionBatch` through `Runner` so numpy-tensor conversion happens once per fold rather than on every call
 - **MPI / multi-GPU support** — distributed scoring and calibration across a GPU cluster via MPI
 
 ### Calibration
-- **Target Abstraction** — currently, calibrators hardcode `weighted_iv` as the loss function. This needs to be abstracted so models can be calibrated directly on prices or other metrics. Crucially, the target must support both scalar scoring (for black-box optimizers like Puzir/EvoSax) and residual vector generation (for gradient-based methods like Levenberg-Marquardt).
+- **Target Abstraction** — currently, calibrators hardcode `weighted_iv` as the loss function. This needs to be abstracted so models can be calibrated directly on prices or other metrics. Crucially, the target must support both scalar scoring (for black-box optimizers like Puzir/EvoSax) and residual vector generation (for gradient-based methods like Levenberg-Marquardt)
 - **Optuna pruning** — shared explore phase across tuner trials + per-iteration pruning in refine; requires splitting calibration into explore-only / refine-only phases
 - **JAX Migration** — port the core framework and pricing models to a JAX backend to fully utilize XLA compilation and unify the codebase. This will eliminate the `backends/torch` abstraction layer entirely, promoting JAX arrays to the `core` level. Consequently, the "CPU-GPU transfers" bottleneck will disappear, as data will reside natively on the device from the start. That is, core abstractions will utilize JAX arrays instead of numpy, with only weight functionality left, filtering will be removed and **become a part of DataSource contract**.
-- **Natural NES+EDA hybrid** — run multiple NES trials simultaneously, partitioned into K clusters for population-level diversity
-- **CPU-baseline calibrators** — add BS, SABR, Heston calibrators wrapping `fypy` to benchmark against existing CPU-based methods and demonstrate the GPU speedup
 
 ### Models
-- **Variance Gamma (VG)** — pure-jump Lévy process; three-parameter closed-form pricing via characteristic function; captures skew and excess kurtosis without stochastic vol
-- **Rough Volatility (Rough Heston / rBergomi)** — cutting-edge models driven by fractional Brownian motion. Perfectly captures the power-law explosion of ATM skew at short maturities, which is critical for highly volatile crypto markets.
-- **Path-Dependent Volatility (PDV / Guyon-Lipton)** — advanced frontier models that construct the instantaneous volatility surface directly from the historical path of the underlying asset, completely eliminating the need for unobservable state variables.
-- **Neural SDEs / Neural Stochastic Volatility** — hybrid frontier models that use neural networks to learn the drift and diffusion coefficients of the volatility process directly from panel data, bridging the gap between rigorous analytical SDEs and deep learning.
 - **Gaussian process model** — non-parametric vol surface model; variant that takes predictions of analytical models as input features
-- **Analytical Jacobians & Gradients** — currently Jacobian (and potentially gradients) are vomputed via `torch.func.jacfwd` (forward-mode AD), which requires one forward pass per parameter. For models with known closed-form derivatives this is unnecessary overhead which should be reduced
+- **Variance Gamma (VG)** — pure-jump Lévy process; three-parameter closed-form pricing via characteristic function; captures skew and excess kurtosis without stochastic vol
+- **Rough Volatility (Rough Heston / rBergomi)** — cutting-edge models driven by fractional Brownian motion. Perfectly captures the power-law explosion of ATM skew at short maturities, which is critical for highly volatile crypto markets
+- **Path-Dependent Volatility (PDV / Guyon-Lipton)** — advanced frontier models that construct the instantaneous volatility surface directly from the historical path of the underlying asset, completely eliminating the need for unobservable state variables
 - **Historical fit for analytical models** — calibrate parameters that are identifiable from underlying price history (e.g. drift, vol-of-vol) directly from discounted underlying price series, reducing the degrees of freedom left to the options calibrator
+- **Advanced Quadrature Methods** — implement Filon's Quadrature (for deep OTM/ITM options with highly oscillatory integrands) and Double-Exponential (Tanh-Sinh) Quadrature (for robust, cryptographically high-precision ground truth testing of other algorithms)
+- **Analytical Jacobians & Gradients** — currently Jacobian (and potentially gradients) are vomputed via `torch.func.jacfwd` (forward-mode AD), which requires one forward pass per parameter. For models with known closed-form derivatives this is unnecessary overhead which should be reduced
+- **Neural SDEs / Neural Stochastic Volatility** — hybrid frontier models that use neural networks to learn the drift and diffusion coefficients of the volatility process directly from panel data, bridging the gap between rigorous analytical SDEs and deep learning
 
 ### Contracts & hedging
-- **American and Asian contract support** — add `models/analytical/american/` and `models/analytical/asian/` with numerical pricers (LSM Monte Carlo, PDE, Turnbull-Wakeman approximation); make calibrator `score_fn` injectable so price-RMSE or contract-specific metrics can replace the default IV-RMSE; for contracts where a single forward pass is expensive (Monte Carlo simulation), grid-search calibrators are wasteful — consider sequential Bayesian calibrators (Optuna GPSampler / CMA-ES via ask-tell) that minimise the number of forward evaluations
+- **American and Asian contract support** — add models variations with numerical pricers (LSM Monte Carlo, PDE, Turnbull-Wakeman approximation); will need loss function ot be injectable so price-RMSE or contract-specific metrics can replace the default IV-RMSE; for contracts where a single forward pass is expensive (Monte Carlo simulation), grid-search exhaustive calibrators are wasteful — consider other approaches like sequential Bayesian calibrators (Optuna GPSampler) that minimise the number of forward evaluations
 - **Hedging support** — extend `Model` with optional Greeks (delta, vega, gamma)

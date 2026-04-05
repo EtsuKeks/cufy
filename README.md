@@ -32,7 +32,7 @@ pip install cufy
 
 ### Backtesting
 - **Speculative backtest engine** — fold-by-fold calibration + pricing loop; possibly synthetic dealing
-- **MLflow integration** — param/metric logging, vol surface artifacts, aggregate metrics
+- **MLflow integration** — initial implementation exists, but needs rework: calibrator-specific helpers are too tightly coupled to internal implementation details and should move closer to their respective calibrators
 - **Hedging backtest engine** — separate hedging engine; requires fold philosophy change (fit today, evaluate over full TTM horizon), new models added (convenient for hedging purposes)
 
 ### Infrastructure

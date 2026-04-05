@@ -31,7 +31,7 @@ class Merton(TorchParameterizedModel):
         max_lam_T = float(torch.max(lam_T_raw).item())
         max_jumps = int(max_lam_T + 6.0 * math.sqrt(max_lam_T) + 10)
 
-        var_j = sigma_j * sigma_j
+        var_j = sigma_j.square()
         log_mean_jump = mu_j + 0.5 * var_j
         kappa = torch.exp(log_mean_jump) - 1.0
 
@@ -39,13 +39,13 @@ class Merton(TorchParameterizedModel):
         lam_T = torch.clamp(lam_T_raw, min=config.eps).unsqueeze(1)
         log_i_fact = torch.lgamma(i + 1.0)
         exponent = torch.addcmul(-log_i_fact, i, torch.log(lam_T))
-        W = torch.exp(-lam_T) * torch.exp(exponent)
+        W = torch.exp(exponent - lam_T)
 
         F_drifted = F[None, :] * torch.exp((-lam * kappa) * T[None, :])
         exp_jump = torch.exp(i * log_mean_jump.unsqueeze(1))
         F_i = F_drifted.unsqueeze(1) * exp_jump
 
-        inv_T = 1.0 / torch.clamp(T[None, :], min=config.eps)
+        inv_T = torch.clamp(T[None, :], min=config.eps).reciprocal()
         var_j_over_T = var_j * inv_T
         sigma_sq = sigma.square().unsqueeze(1)
         sigma_i = torch.sqrt(torch.addcmul(sigma_sq, i, var_j_over_T.unsqueeze(1)))

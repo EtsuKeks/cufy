@@ -122,7 +122,7 @@ class PuzirCalibrator(GridSearchCalibrator):
             hist_p = self._hist_params
 
             score_min = torch.min(self._hist_scores)
-            weights = torch.exp(-(hist_s - score_min) / cfg.temperature).clamp_min(eps)
+            weights = torch.exp((score_min - hist_s) / cfg.temperature).clamp_min(eps)
             idx = torch.multinomial(weights, num_samples=m, replacement=True)
             base_scores = hist_s.index_select(0, idx)
             base = hist_p.index_select(0, idx)

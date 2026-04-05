@@ -47,7 +47,7 @@ class Merton(TorchParameterizedModel):
 
         inv_T = 1.0 / torch.clamp(T[None, :], min=config.eps)
         var_j_over_T = var_j * inv_T
-        sigma_sq = (sigma * sigma).unsqueeze(1)
+        sigma_sq = sigma.square().unsqueeze(1)
         sigma_i = torch.sqrt(torch.addcmul(sigma_sq, i, var_j_over_T.unsqueeze(1)))
 
         return torch.sum(W * bs_price_from_tensors(F=F_i, K=K, T=T, is_call=is_call, df=df, sigma=sigma_i)[0], dim=1)

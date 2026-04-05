@@ -27,10 +27,8 @@ def bs_price_from_tensors(
 
     sig = torch.clamp(sigma, min=eps_t)
     term1 = C1 / sig
-    term2 = C2 * sig
-
-    d1 = term1 + term2
-    d2 = term1 - term2
+    d1 = torch.addcmul(term1, C2, sig)
+    d2 = torch.addcmul(term1, C2, sig, value=-1.0)
 
     omega = torch.where(is_call_b, 1.0, -1.0)
     Nd1_omega = torch.special.ndtr(omega * d1)
@@ -59,7 +57,7 @@ def _bs_vega_from_tensors(
     C2 = 0.5 * sqrtT
 
     sig = torch.clamp(sigma, min=eps_t)
-    d1 = C1 / sig + C2 * sig
+    d1 = torch.addcmul(C1 / sig, C2, sig)
 
     vega_coeff = df_b * F_b * sqrtT * _INV_SQRT_2PI
     return vega_coeff * torch.exp(-0.5 * d1 * d1)
@@ -155,10 +153,8 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
             converged_mask = torch.zeros_like(sigma, dtype=torch.bool)
             for _ in range(max_iter):
                 term1 = C1 / sigma
-                term2 = C2 * sigma
-
-                d1 = term1 + term2
-                d2 = term1 - term2
+                d1 = torch.addcmul(term1, C2, sigma)
+                d2 = torch.addcmul(term1, C2, sigma, value=-1.0)
 
                 Nd1_omega = torch.special.ndtr(omega * d1)
                 Nd2_omega = torch.special.ndtr(omega * d2)
@@ -197,7 +193,7 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
         eps_t = config.eps
 
         sig = torch.clamp(sigma, min=eps_t)
-        d1 = C1 / sig + C2 * sig
+        d1 = torch.addcmul(C1 / sig, C2, sig)
         vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1 * d1), min=eps_t)
         grad_price = grad_sigma / vega
         return grad_price, None, None, None, None, None, None, None, None

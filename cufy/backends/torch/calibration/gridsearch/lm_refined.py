@@ -65,7 +65,7 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
         preds = self.model.prices_for_param_matrix(data=data, param_matrix=P)
         iv_model = implied_vol_newton(price=preds, data=data, sigma_init=close_IV_t)
         err = w_sqrt[None, :] * (iv_model - close_IV_t[None, :])
-        E = torch.sum(err.square(), dim=-1)
+        E = err.square().sum(dim=-1)
         return iv_model, err, E
 
     def _run_lm(
@@ -97,7 +97,7 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
             with torch.enable_grad():
                 J_price = vmap(jacfwd(price_fn_single))(p_cur)
 
-            J = (w_sqrt[None, :] * didc).unsqueeze(-1) * J_price
+            J = (w_sqrt * didc).unsqueeze(-1) * J_price
             JtJ = torch.bmm(J.mT, J)
             Jte = torch.bmm(J.mT, err_cur.unsqueeze(-1))
 
@@ -112,7 +112,7 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
 
             dP_actual = p_prop - p_cur
             JtJ_dP = torch.bmm(JtJ, dP_actual.unsqueeze(-1)).squeeze(-1)
-            dL = -torch.sum(dP_actual * (Jte.squeeze(-1) + 0.5 * JtJ_dP), dim=-1)
+            dL = -(dP_actual * torch.add(Jte.squeeze(-1), JtJ_dP, alpha=0.5)).sum(-1)
 
             dF = 0.5 * (E_cur - E_prop)
             rho = dF / dL.clamp_min(config.eps)

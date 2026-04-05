@@ -60,7 +60,7 @@ def _bs_vega_from_tensors(
     d1 = torch.addcmul(C1 / sig, C2, sig)
 
     vega_coeff = df_b * F_b * sqrtT * _INV_SQRT_2PI
-    return vega_coeff * torch.exp(-0.5 * d1 * d1)
+    return vega_coeff * torch.exp(-0.5 * d1.square())
 
 
 def bs_vega(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
@@ -96,7 +96,7 @@ def implied_vol_newton(
 def weighted_iv(*, data: TorchPreparedBatch, pred_prices: torch.Tensor) -> torch.Tensor:
     pred_iv = implied_vol_newton(price=pred_prices, data=data, sigma_init=data.close_IV_t)
     d = pred_iv - data.close_IV_t[None, :]
-    s = torch.sum(data.w_t[None, :] * (d * d), 1)
+    s = torch.sum(data.w_t[None, :] * d.square(), 1)
     return torch.sqrt(torch.clamp(s, min=0.0))
 
 
@@ -160,7 +160,7 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
                 Nd2_omega = torch.special.ndtr(omega * d2)
 
                 model_price = omega_F_df * Nd1_omega - omega_K_df * Nd2_omega
-                vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1 * d1), min=eps_t)
+                vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1.square()), min=eps_t)
                 step = (model_price - price_clamped) / vega
 
                 converged_mask = torch.abs(step) <= eps_t
@@ -194,7 +194,7 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
 
         sig = torch.clamp(sigma, min=eps_t)
         d1 = torch.addcmul(C1 / sig, C2, sig)
-        vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1 * d1), min=eps_t)
+        vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1.square()), min=eps_t)
         grad_price = grad_sigma / vega
         return grad_price, None, None, None, None, None, None, None, None
 

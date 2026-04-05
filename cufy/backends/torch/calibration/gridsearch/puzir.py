@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from typing import Literal
 
@@ -9,6 +10,8 @@ import cufy.backends.torch.config as config
 from cufy.backends.torch.calibration.gridsearch.base import GridSearchCalibrator, GridSearchConfig
 from cufy.backends.torch.models.base import TorchParameterizedModel
 from cufy.backends.torch.utils.torch_utils import TorchPreparedBatch
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -54,6 +57,7 @@ class PuzirCalibrator(GridSearchCalibrator):
 
     def __init__(self, model: TorchParameterizedModel, cfg: PuzirConfig):
         super().__init__(model, cfg=cfg)
+        self._logged_small_hist_warning = False
         k_min = len(model.params) + 1
         if self.cfg.neighbors_k < k_min:
             raise ValueError(f"cfg.neighbors_k must be >= (num_params + 1) = {k_min}; got {self.cfg.neighbors_k}")
@@ -93,6 +97,9 @@ class PuzirCalibrator(GridSearchCalibrator):
             cell = p_range * (self._checked_search_points ** (-1.0 / p_dim))
         h = (cell * cfg.jitter_scale).clamp_min(eps)
 
+        total_batches = 0
+        small_hist_batches = 0
+
         def _chol_pd_batch(C: torch.Tensor) -> torch.Tensor:
             E = int(C.shape[0])
             L, info = torch.linalg.cholesky_ex(C)
@@ -106,6 +113,10 @@ class PuzirCalibrator(GridSearchCalibrator):
         while budget > 0:
             m = min(self._checked_param_batch_size, budget)
             budget -= m
+
+            total_batches += 1
+            if int(self._hist_scores.shape[0]) < m:
+                small_hist_batches += 1
 
             hist_s = self._hist_scores
             hist_p = self._hist_params
@@ -189,6 +200,14 @@ class PuzirCalibrator(GridSearchCalibrator):
             cand = torch.cat([cand_elite, cand_non], dim=0)
             scores = self._score_params(P=cand, data=data)
             self._history_merge(params=cand, scores=scores)
+
+        if small_hist_batches > 0 and small_hist_batches >= total_batches / 2.0 and not self._logged_small_hist_warning:
+            self._logged_small_hist_warning = True
+            logger.warning(
+                f"History size was smaller than batch size for {small_hist_batches}/{total_batches} refine batches. "
+                f"Final history size: {int(self._hist_scores.shape[0])}, batch size: {self._checked_param_batch_size}. "
+                f"Consider increasing cfg.history_points_fraction or initial exploration budget."
+            )
 
         best_p = self._hist_params[torch.argmin(self._hist_scores)]
         for i, p in enumerate(self.model.params):

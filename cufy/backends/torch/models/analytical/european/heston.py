@@ -11,7 +11,7 @@ from cufy.core.parameterized_model import ModelParam
 _PI = math.pi
 
 
-def heston_characteristic_attari(
+def heston_characteristic_log_attari(
     w_complex: torch.Tensor,
     iw: torch.Tensor,
     t: torch.Tensor,
@@ -37,7 +37,7 @@ def heston_characteristic_attari(
     num_g_eta = num_g * eta_sq_inv
     D = torch.addcmul(num_g_eta, num_g_eta, exp_h_t, value=-1.0) / one_minus_g_exp
 
-    return torch.exp(torch.addcmul(C_V_bar, D, V_0))
+    return torch.addcmul(C_V_bar, D, V_0)
 
 
 class Heston(TorchParameterizedModel):
@@ -92,7 +92,10 @@ class Heston(TorchParameterizedModel):
             w_sq = w.square()
             iw = 1j * w
             w_complex = torch.complex(w_sq, w)
-            cf = heston_characteristic_attari(w_complex, iw, t_t, a, rho_eta, eta_sq, eta_sq_inv, C_coeff, V_0)
+            log_cf = heston_characteristic_log_attari(
+                w_complex, iw, t_t, a, rho_eta, eta_sq, eta_sq_inv, C_coeff, V_0
+            )
+            cf = torch.exp(log_cf)
 
             w_k_log = w * k_log
             cos_w_k_log = torch.cos(w_k_log)

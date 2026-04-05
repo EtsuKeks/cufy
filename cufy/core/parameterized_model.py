@@ -38,7 +38,7 @@ class ParameterizedModel(TunableModel, ABC):
                 elif k in found:
                     raise TypeError(
                         f"Class {cls.__name__} overrides parameter '{k}' with a non-ModelParam value "
-                        f"of type {type(v).__name__}. Parameters must be overridden with ModelParam instances."
+                        f"of type {type(v).__name__}. Parameters must be overridden with ModelParam instances"
                     )
 
         if not found:

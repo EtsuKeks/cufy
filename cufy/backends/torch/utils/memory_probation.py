@@ -8,7 +8,9 @@ import psutil
 import torch
 
 import cufy.backends.torch.config as config
-from cufy.logging import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _is_oom_error(e: Exception) -> bool:

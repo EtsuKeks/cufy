@@ -53,7 +53,7 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
         if missing:
             raise ValueError(
                 f"cfg.calibrate_radii is missing entries for parameters: {missing}. "
-                f"All model parameters must have a calibration radius."
+                f"All model parameters must have a calibration radius"
             )
         extra = sorted(set(radii.keys()) - param_names)
         if extra:
@@ -76,7 +76,7 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
                 if missing_pts:
                     raise ValueError(
                         f"cfg.{field_name} is missing entries for parameters: {missing_pts}. "
-                        f"All model parameters must have grid point counts when initial_sampler='grid'."
+                        f"All model parameters must have grid point counts when initial_sampler='grid'"
                     )
                 extra_pts = sorted(set(pts_dict.keys()) - param_names)
                 if extra_pts:

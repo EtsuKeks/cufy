@@ -81,7 +81,7 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
         close_IV_t = data.close_IV_t
 
         if bool((data.w_t < 0.0).any()):
-            raise ValueError("All weights in data.w_t must be non-negative for Levenberg-Marquardt calibration.")
+            raise ValueError("All weights in data.w_t must be non-negative for Levenberg-Marquardt calibration")
         w_sqrt = torch.sqrt(data.w_t)
 
         with torch.no_grad():
@@ -168,7 +168,7 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
                 raise ValueError(
                     f"History size ({int(hist_s.shape[0])}) is smaller than batch size ({m}). "
                     f"Levenberg-Marquardt is deterministic and cannot process duplicate points in a batch. "
-                    f"Consider increasing cfg.history_points_fraction or initial exploration budget."
+                    f"Consider increasing cfg.history_points_fraction or initial exploration budget"
                 )
 
             idx = torch.multinomial(weights, num_samples=m, replacement=False)

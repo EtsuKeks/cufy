@@ -75,7 +75,7 @@ class PuzirCalibrator(GridSearchCalibrator):
         if hist_size < k_min:
             raise ValueError(
                 f"Configured history size ({hist_size}) is too small for kNN covariance. "
-                f"Need at least {k_min} points. Increase cfg.history_points_fraction or initial exploration budget."
+                f"Need at least {k_min} points. Increase cfg.history_points_fraction or initial exploration budget"
             )
 
         cfg = self.cfg

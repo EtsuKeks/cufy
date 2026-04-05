@@ -187,7 +187,7 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
         with torch.no_grad():
             preds = self.model.prices_for_param_matrix(data=data, param_matrix=P)
             out = weighted_iv(data=data, pred_prices=preds).detach()
-        return out
+        return torch.nan_to_num(out, nan=1e9, posinf=1e9)
 
     def _history_merge(self, params: torch.Tensor, scores: torch.Tensor) -> None:
         K = self._checked_history_size

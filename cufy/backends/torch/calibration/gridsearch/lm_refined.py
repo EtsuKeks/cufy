@@ -128,7 +128,7 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
             lam = torch.where(accept, lam * lam_factor_success, lam * nu)
             nu = torch.where(accept, 2.0, nu * 2.0)
 
-        return p_cur, torch.sqrt(E_cur)
+        return p_cur, torch.nan_to_num(torch.sqrt(E_cur), nan=1e9, posinf=1e9)
 
     def probe(
         self, *, data: TorchPreparedBatch, pmin: torch.Tensor, pmax: torch.Tensor

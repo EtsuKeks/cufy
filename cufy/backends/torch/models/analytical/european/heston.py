@@ -9,6 +9,7 @@ from cufy.backends.torch.utils.torch_utils import TorchPreparedBatch
 from cufy.core.parameterized_model import ModelParam
 
 _PI = math.pi
+_PI_INV = 1.0 / math.pi
 
 
 def heston_characteristic_log_attari(
@@ -112,6 +113,6 @@ class Heston(TorchParameterizedModel):
             integrand, lower=self.lower, upper=self.upper, num_points=self.num_points, method=self.method
         )
 
-        undiscounted_call_prices = F_t - K_t * (0.5 + integral / _PI)
+        undiscounted_call_prices = F_t - K_t * (0.5 + integral * _PI_INV)
         undiscounted_put_prices = undiscounted_call_prices - F_t + K_t
         return torch.where(is_call_t, undiscounted_call_prices, undiscounted_put_prices) * df_t

@@ -87,7 +87,6 @@ class PuzirCalibrator(GridSearchCalibrator):
         dt = config.dtype
         eps = config.eps
 
-        best_p = self._hist_params[torch.argmin(self._hist_scores)]
         p_dim = len(self.model.params)
 
         p_range = (p_max - p_min).clamp_min(eps)
@@ -103,10 +102,11 @@ class PuzirCalibrator(GridSearchCalibrator):
         def _chol_pd_batch(C: torch.Tensor) -> torch.Tensor:
             E = int(C.shape[0])
             L, info = torch.linalg.cholesky_ex(C)
-            if bool(info.ne(0).any()):
-                cnt = int(torch.sum(info.ne(0)).item())
+            failed = info.ne(0)
+            if bool(failed.any()):
                 raise optuna.exceptions.TrialPruned(
-                    f"Cholesky failed for {cnt}/{E} elite covariances with configured damping regularization"
+                    f"Cholesky failed for {int(failed.sum().item())}/{E} elite covariances "
+                    "with configured damping regularization"
                 )
             return L
 
@@ -138,8 +138,9 @@ class PuzirCalibrator(GridSearchCalibrator):
 
             cand_non = torch.addcmul(non, torch.randn_like(non), h[None, :]).clamp(min=p_min, max=p_max)
 
-            elites_norm = (elites - p_min[None, :]) / p_range[None, :]
-            hist_norm = (hist_p - p_min[None, :]) / p_range[None, :]
+            p_range_inv = p_range.reciprocal()
+            elites_norm = (elites - p_min[None, :]) * p_range_inv[None, :]
+            hist_norm = (hist_p - p_min[None, :]) * p_range_inv[None, :]
             dists = torch.cdist(elites_norm, hist_norm)
             dists.masked_fill_(dists <= eps, float("inf"))
 
@@ -152,7 +153,7 @@ class PuzirCalibrator(GridSearchCalibrator):
 
             X = neigh - elites[:, None, :]
             XtX = torch.bmm(X.transpose(1, 2), X)
-            cov = XtX / float(max(1, k - 1))
+            cov = XtX.mul(1.0 / max(1, k - 1))
             if cfg.damping > 0.0:
                 diag_reg = (cfg.damping * torch.diagonal(cov, dim1=-2, dim2=-1)).clamp_min(eps)
                 cov_reg = cov + torch.diag_embed(diag_reg)
@@ -177,7 +178,7 @@ class PuzirCalibrator(GridSearchCalibrator):
                 top_p = torch.gather(neigh, 1, top_pos[:, :, None].expand(-1, -1, p_dim))
 
                 rank = torch.arange(1, mu_n + 1, device=d, dtype=dt)
-                w = torch.log(torch.as_tensor(mu_n + 0.5, device=d, dtype=dt)) - torch.log(rank)
+                w = torch.log(torch.as_tensor((mu_n + 0.5), device=d, dtype=dt) / rank)
                 w = w / w.sum()
 
                 step_raw = (w[None, :, None] * top_p).sum(dim=1) - elites

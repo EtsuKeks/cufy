@@ -125,7 +125,7 @@ class PuzirCalibrator(GridSearchCalibrator):
             elites = base.index_select(0, elite_idx)
             non = base.index_select(0, non_idx)
 
-            cand_non = (non + torch.randn_like(non) * h[None, :]).clamp(min=p_min, max=p_max)
+            cand_non = torch.addcmul(non, torch.randn_like(non), h[None, :]).clamp(min=p_min, max=p_max)
 
             elites_norm = (elites - p_min[None, :]) / p_range[None, :]
             hist_norm = (hist_p - p_min[None, :]) / p_range[None, :]

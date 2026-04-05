@@ -56,7 +56,7 @@ def _gauss_legendre(
 
     roots, weights = _GAUSS_LEGENDRE_CACHE[cache_key]
     half_diff = (upper - lower) * 0.5
-    half_sum = (upper + lower) * 0.5
+    half_sum = torch.lerp(lower, upper, 0.5)
     if half_diff.ndim > 0:
         grid = torch.addcmul(half_sum.unsqueeze(-1), half_diff.unsqueeze(-1), roots)
     else:

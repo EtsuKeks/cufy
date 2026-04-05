@@ -154,7 +154,7 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
             def _run():
                 with torch.no_grad():
                     U = torch.rand((m, pmin.numel()), device=d, dtype=dt)
-                    P = torch.addcmul(pmin[None, :], U, (pmax - pmin)[None, :])
+                    P = torch.lerp(pmin, pmax, U)
                     _ = self.model.prices_for_param_matrix(data=data.slice(n), param_matrix=P)
 
             return _run
@@ -214,7 +214,7 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
             engine = torch.quasirandom.SobolEngine(dimension=p_dim, scramble=True)
             for s in range(0, N, bs):
                 U = engine.draw(min(bs, N - s)).to(device=d, dtype=config.dtype)
-                candidates = torch.addcmul(p_min[None, :], U, (p_max - p_min)[None, :]).clamp(min=p_min, max=p_max)
+                candidates = torch.lerp(p_min, p_max, U).clamp(min=p_min, max=p_max)
                 scores = self._score_params(candidates, data)
                 self._history_merge(candidates, scores)
         else:

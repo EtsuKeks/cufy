@@ -93,9 +93,7 @@ class Heston(TorchParameterizedModel):
             w_sq = w.square()
             iw = 1j * w
             w_complex = torch.complex(w_sq, w)
-            log_cf = heston_characteristic_log_attari(
-                w_complex, iw, t_t, a, rho_eta, eta_sq, eta_sq_inv, C_coeff, V_0
-            )
+            log_cf = heston_characteristic_log_attari(w_complex, iw, t_t, a, rho_eta, eta_sq, eta_sq_inv, C_coeff, V_0)
             cf = torch.exp(log_cf)
 
             w_k_log = w * k_log
@@ -104,10 +102,10 @@ class Heston(TorchParameterizedModel):
 
             w_inv = w.reciprocal()
             weight = (1.0 + w_sq).reciprocal()
-            C1 = torch.addcmul(cos_w_k_log, sin_w_k_log, w_inv, value=-1.0) * weight
-            C2 = torch.addcmul(sin_w_k_log, cos_w_k_log, w_inv) * weight
+            C1 = torch.addcmul(cos_w_k_log, sin_w_k_log, w_inv, value=-1.0)
+            C2 = torch.addcmul(sin_w_k_log, cos_w_k_log, w_inv)
 
-            return torch.addcmul(cf.real * C1, cf.imag, C2)
+            return torch.addcmul(cf.real * C1, cf.imag, C2) * weight
 
         integral = definite_integral(
             integrand, lower=self.lower, upper=self.upper, num_points=self.num_points, method=self.method

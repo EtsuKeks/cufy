@@ -1,4 +1,5 @@
 import gc
+import logging
 import os
 import threading
 import time
@@ -8,7 +9,6 @@ import psutil
 import torch
 
 import cufy.backends.torch.config as config
-import logging
 
 logger = logging.getLogger(__name__)
 

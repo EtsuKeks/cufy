@@ -36,8 +36,8 @@ class GridSearchConfig:
             raise ValueError("calibrate_points_fraction must be > 0.0")
         if self.history_points_fraction <= 0.0:
             raise ValueError("history_points_fraction must be > 0.0")
-        if not (0.0 <= self.available_memory_fraction <= 1.0):
-            raise ValueError("available_memory_fraction must be in [0.0, 1.0]")
+        if not (0.0 < self.available_memory_fraction <= 1.0):
+            raise ValueError("available_memory_fraction must be in (0.0, 1.0]")
         if self.probe_max_candidates_fraction <= 0.0:
             raise ValueError("probe_max_candidates_fraction must be > 0.0")
 

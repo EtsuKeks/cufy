@@ -90,7 +90,7 @@ class PuzirCalibrator(GridSearchCalibrator):
         p_dim = len(self.model.params)
 
         p_range = (p_max - p_min).clamp_min(eps)
-        if cfg.initial_sampler == "grid":
+        if cfg.sampler == "grid":
             cell = p_range / torch.tensor([max(x - 1, 1) for x in self._search_points_detailed], device=d, dtype=dt)
         else:
             cell = p_range * (self._checked_search_points ** (-1.0 / p_dim))

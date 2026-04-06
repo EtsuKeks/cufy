@@ -30,15 +30,6 @@ class GridSearchConfig:
     probe_max_candidates_fraction: float
 
     def __post_init__(self) -> None:
-        if self.history_points_fraction <= 0.0:
-            raise ValueError("history_points_fraction must be > 0.0")
-        if not (0.0 < self.available_memory_fraction <= 1.0):
-            raise ValueError("available_memory_fraction must be in (0.0, 1.0]")
-        if self.probe_max_candidates_fraction <= 0.0:
-            raise ValueError("probe_max_candidates_fraction must be > 0.0")
-        bad_radii = [name for name, r in self.calibrate_radii.items() if r < 0.0]
-        if bad_radii:
-            raise ValueError(f"calibrate_radii has negative radius for parameters: {bad_radii}")
         if self.sampler == "sobol":
             if self.search_points is None:
                 raise ValueError("cfg.search_points must be set when sampler='sobol'")
@@ -48,6 +39,9 @@ class GridSearchConfig:
                 raise ValueError("cfg.initial_search_scale must be set when sampler='sobol'")
             if self.initial_search_scale <= 0.0:
                 raise ValueError("initial_search_scale must be > 0.0")
+        bad_radii = [name for name, r in self.calibrate_radii.items() if r < 0.0]
+        if bad_radii:
+            raise ValueError(f"calibrate_radii has negative radius for parameters: {bad_radii}")
         elif self.sampler == "grid":
             for field_name, pts_dict in (
                 ("grid_points", self.grid_points),
@@ -58,6 +52,12 @@ class GridSearchConfig:
                 bad_pts = [name for name, n in pts_dict.items() if n < 1]
                 if bad_pts:
                     raise ValueError(f"cfg.{field_name} has point counts < 1 for parameters: {bad_pts}")
+        if self.history_points_fraction <= 0.0:
+            raise ValueError("history_points_fraction must be > 0.0")
+        if not (0.0 < self.available_memory_fraction <= 1.0):
+            raise ValueError("available_memory_fraction must be in (0.0, 1.0]")
+        if self.probe_max_candidates_fraction <= 0.0:
+            raise ValueError("probe_max_candidates_fraction must be > 0.0")
 
 
 class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):

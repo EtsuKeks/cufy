@@ -19,27 +19,45 @@ from cufy.core.tuner import TunableCalibrator
 
 @dataclass
 class GridSearchConfig:
-    initial_sampler: Literal["grid", "sobol"]
-    initial_points: int | None
-    calibrate_points_fraction: float | None
+    sampler: Literal["grid", "sobol"]
+    search_points: int | None
+    initial_search_scale: float | None
+    calibrate_radii: dict[str, float]
+    grid_points: dict[str, int]
+    grid_points_initial: dict[str, int]
     history_points_fraction: float
     available_memory_fraction: float
     probe_max_candidates_fraction: float
-    calibrate_radii: dict[str, float]
-    grid_points_initial: dict[str, int]
-    grid_points_calibrate: dict[str, int]
 
     def __post_init__(self) -> None:
-        if self.initial_points is not None and self.initial_points < 1:
-            raise ValueError("initial_points must be >= 1")
-        if self.calibrate_points_fraction is not None and self.calibrate_points_fraction <= 0.0:
-            raise ValueError("calibrate_points_fraction must be > 0.0")
         if self.history_points_fraction <= 0.0:
             raise ValueError("history_points_fraction must be > 0.0")
         if not (0.0 < self.available_memory_fraction <= 1.0):
             raise ValueError("available_memory_fraction must be in (0.0, 1.0]")
         if self.probe_max_candidates_fraction <= 0.0:
             raise ValueError("probe_max_candidates_fraction must be > 0.0")
+        bad_radii = [name for name, r in self.calibrate_radii.items() if r < 0.0]
+        if bad_radii:
+            raise ValueError(f"calibrate_radii has negative radius for parameters: {bad_radii}")
+        if self.sampler == "sobol":
+            if self.search_points is None:
+                raise ValueError("cfg.search_points must be set when sampler='sobol'")
+            if self.search_points < 1:
+                raise ValueError("search_points must be >= 1")
+            if self.initial_search_scale is None:
+                raise ValueError("cfg.initial_search_scale must be set when sampler='sobol'")
+            if self.initial_search_scale <= 0.0:
+                raise ValueError("initial_search_scale must be > 0.0")
+        elif self.sampler == "grid":
+            for field_name, pts_dict in (
+                ("grid_points", self.grid_points),
+                ("grid_points_initial", self.grid_points_initial),
+            ):
+                if not pts_dict:
+                    raise ValueError(f"cfg.{field_name} must not be empty when sampler='grid'")
+                bad_pts = [name for name, n in pts_dict.items() if n < 1]
+                if bad_pts:
+                    raise ValueError(f"cfg.{field_name} has point counts < 1 for parameters: {bad_pts}")
 
 
 class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
@@ -58,32 +76,21 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
         extra = sorted(set(radii.keys()) - param_names)
         if extra:
             raise ValueError(f"cfg.calibrate_radii has entries for unknown parameters: {extra}")
-        bad = [name for name, r in radii.items() if r < 0.0]
-        if bad:
-            raise ValueError(f"cfg.calibrate_radii has negative radius for parameters: {bad}")
 
-        if self.cfg.initial_sampler == "sobol":
-            if self.cfg.initial_points is None:
-                raise ValueError("cfg.initial_points must be set when initial_sampler='sobol'")
-            if self.cfg.calibrate_points_fraction is None:
-                raise ValueError("cfg.calibrate_points_fraction must be set when initial_sampler='sobol'")
-        elif self.cfg.initial_sampler == "grid":
+        if self.cfg.sampler == "grid":
             for field_name, pts_dict in (
-                ("grid_points_initial", self.cfg.grid_points_initial),
-                ("grid_points_calibrate", self.cfg.grid_points_calibrate),
+                ("grid_points", cfg.grid_points),
+                ("grid_points_initial", cfg.grid_points_initial),
             ):
                 missing_pts = sorted(param_names - set(pts_dict.keys()))
                 if missing_pts:
                     raise ValueError(
                         f"cfg.{field_name} is missing entries for parameters: {missing_pts}. "
-                        f"All model parameters must have grid point counts when initial_sampler='grid'"
+                        f"All model parameters must have grid point counts when sampler='grid'"
                     )
                 extra_pts = sorted(set(pts_dict.keys()) - param_names)
                 if extra_pts:
                     raise ValueError(f"cfg.{field_name} has entries for unknown parameters: {extra_pts}")
-                bad_pts = [name for name, n in pts_dict.items() if n < 1]
-                if bad_pts:
-                    raise ValueError(f"cfg.{field_name} has point counts < 1 for parameters: {bad_pts}")
 
         self._param_batch_sizer: Callable[[int], int] | None = None
         self._param_batch_size: int | None = None
@@ -131,16 +138,17 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
         return float(self._score_params(P=p_cur, data=data)[0].item())
 
     def _set_explore_plan(self) -> None:
-        is_initial_stage = not self.model.is_initialized()
-        if self.cfg.initial_sampler == "sobol":
+        cfg = self.cfg
+        is_initial = not self.model.is_initialized()
+        if cfg.sampler == "sobol":
+            assert cfg.search_points is not None
+            assert cfg.initial_search_scale is not None
             self._search_points = (
-                self.cfg.initial_points
-                if is_initial_stage
-                else max(1, int(self.cfg.initial_points * self.cfg.calibrate_points_fraction))  # type: ignore[arg-type]
+                max(1, round(cfg.search_points * cfg.initial_search_scale)) if is_initial else cfg.search_points
             )
             return
 
-        pts_dict = self.cfg.grid_points_initial if is_initial_stage else self.cfg.grid_points_calibrate
+        pts_dict = cfg.grid_points_initial if is_initial else cfg.grid_points
         self._search_points_detailed = [pts_dict[p.name] for p in self.model.params]
         self._search_points = int(np.prod(self._search_points_detailed))
 
@@ -210,7 +218,7 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
         self._hist_params = torch.empty(0, device=d, dtype=config.dtype)
         self._hist_scores = torch.empty(0, device=d, dtype=config.dtype)
 
-        if self.cfg.initial_sampler == "sobol":
+        if self.cfg.sampler == "sobol":
             engine = torch.quasirandom.SobolEngine(dimension=p_dim, scramble=True)
             for s in range(0, N, bs):
                 U = engine.draw(min(bs, N - s)).to(device=d, dtype=config.dtype)

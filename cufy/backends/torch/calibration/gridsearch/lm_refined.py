@@ -97,22 +97,25 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
             with torch.enable_grad():
                 J_price = vmap(jacfwd(price_fn_single))(p_cur)
 
-            J = (w_sqrt * didc).unsqueeze(-1) * J_price
-            JtJ = torch.bmm(J.mT, J)
-            Jte = torch.bmm(J.mT, err_cur.unsqueeze(-1))
+            J = torch.einsum("bn,bnd->bnd", w_sqrt * didc, J_price)
+            JtJ = J.mT @ J
+            Jte = J.mT @ err_cur.unsqueeze(-1)
 
-            diag_matrix = torch.diag_embed(torch.diagonal(JtJ, dim1=-2, dim2=-1).clamp_min(config.eps))
-            L, info = torch.linalg.cholesky_ex(torch.addcmul(JtJ, lam[:, None, None], diag_matrix))
-            dP = -torch.cholesky_solve(Jte, L).squeeze(-1)
-            dP = torch.where((info == 0).unsqueeze(-1), dP, 0.0)
+            diag_JtJ = torch.diagonal(JtJ, dim1=-2, dim2=-1).clamp_min(config.eps)
+            D_inv = torch.rsqrt(diag_JtJ)
+            A_scaled = torch.einsum("bi,bij,bj->bij", D_inv, JtJ, D_inv) + torch.diag_embed(lam)
+            Jte_scaled = Jte * D_inv.unsqueeze(-1)
+            L, info = torch.linalg.cholesky_ex(A_scaled)
+            dP_scaled = -torch.cholesky_solve(Jte_scaled, L).squeeze(-1)
+            dP = torch.where((info == 0).unsqueeze(-1), dP_scaled * D_inv, 0.0)
 
             p_prop = (p_cur + dP).clamp(min=p_min, max=p_max)
             with torch.no_grad():
                 iv_prop, err_prop, E_prop = self._eval_err(P=p_prop, data=data, close_IV_t=close_IV_t, w_sqrt=w_sqrt)
 
             dP_actual = p_prop - p_cur
-            JtJ_dP = torch.bmm(JtJ, dP_actual.unsqueeze(-1)).squeeze(-1)
-            dL = -(dP_actual * torch.add(Jte.squeeze(-1), JtJ_dP, alpha=0.5)).sum(-1)
+            JtJ_dP = (JtJ @ dP_actual.unsqueeze(-1)).squeeze(-1)
+            dL = -torch.einsum("bd,bd->b", dP_actual, Jte.squeeze(-1) + 0.5 * JtJ_dP)
 
             dF = 0.5 * (E_cur - E_prop)
             rho = dF / dL.clamp_min(config.eps)
@@ -124,7 +127,7 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
             err_cur = torch.where(acc, err_prop, err_cur)
             E_cur = torch.where(accept, E_prop, E_cur)
 
-            lam_factor_success = (1.0 - (2.0 * rho - 1.0).pow(3)).clamp_min(1.0 / 3.0)
+            lam_factor_success = (1.0 - (2.0 * rho - 1.0) ** 3).clamp_min(1.0 / 3.0)
             lam = torch.where(accept, lam * lam_factor_success, lam * nu)
             nu = torch.where(accept, 2.0, nu * 2.0)
 
@@ -172,7 +175,7 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
                 )
 
             idx = torch.multinomial(weights, num_samples=m, replacement=False)
-            base = hist_p.index_select(0, idx)
+            base = hist_p[idx]
 
             cand, scores = self._run_lm(P0=base, data=data, p_min=p_min, p_max=p_max)
             self._history_merge(params=cand, scores=scores)

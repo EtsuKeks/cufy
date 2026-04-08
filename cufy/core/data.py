@@ -7,8 +7,6 @@ import numpy as np
 
 import cufy.config as config
 
-_CONFIG_NP_DTYPE = np.dtype(config.dtype)
-
 
 @dataclass(frozen=True, slots=True)
 class OptionBatch:
@@ -35,7 +33,7 @@ class OptionBatch:
                 continue
             elif f.name == "extras":
                 for key, arr in val.items():
-                    if arr.dtype != _CONFIG_NP_DTYPE:
+                    if arr.dtype != np.dtype(config.dtype_str):
                         raise ValueError(f"OptionBatch.extras[{key!r}] dtype {arr.dtype} does not match config dtype")
             else:
                 if val.shape != (n,):
@@ -44,7 +42,7 @@ class OptionBatch:
                     if val.dtype != np.bool_:
                         raise ValueError(f"OptionBatch.{f.name} must have dtype bool, got {val.dtype}")
                 else:
-                    if val.dtype != _CONFIG_NP_DTYPE:
+                    if val.dtype != np.dtype(config.dtype_str):
                         raise ValueError(f"OptionBatch.{f.name} dtype {val.dtype} does not match config dtype")
 
     def __len__(self) -> int:

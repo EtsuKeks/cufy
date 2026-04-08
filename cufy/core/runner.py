@@ -30,7 +30,7 @@ class Runner:
             raise ValueError("filter_fn returned an all-False mask — no options left in batch")
 
         filtered = batch.filter(mask)
-        np_dt = np.dtype(config.dtype)
+        np_dt = np.dtype(config.dtype_str)
         w = self._weights_fn(filtered)
         if w.dtype != np_dt or w.shape != (len(filtered),):
             raise ValueError(

@@ -242,6 +242,11 @@ class GridSearchCalibrator(TunableCalibrator[TorchParameterizedModel]):
                 scores = self._score_params(candidates, data)
                 self._history_merge(candidates, scores)
 
+        if not torch.isfinite(self._hist_scores).any():
+            raise RuntimeError(
+                "Calibration failed: all scores were non-finite. "
+                "Check model parameters bounds, input data validity, or reduce calibrate_radii."
+            )
         best_p = self._hist_params[torch.argmin(self._hist_scores)]
         for i, p in enumerate(self.model.params):
             p.value = float(best_p[i].item())

@@ -149,8 +149,10 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
 
     @staticmethod
     @once_differentiable
-    def backward(ctx: torch.autograd.function.FunctionCtx, grad_sigma: torch.Tensor) -> tuple[torch.Tensor | None, ...]:  # type: ignore[override]
-        if grad_sigma is None:  # type: ignore[comparison-overlap]
+    def backward(  # type: ignore[override]
+        ctx: torch.autograd.function.FunctionCtx, grad_sigma: torch.Tensor | None
+    ) -> tuple[torch.Tensor | None, ...]:
+        if grad_sigma is None:
             return (None,) * 9
 
         if any(ctx.needs_input_grad[i] for i in range(1, 8)):  # type: ignore[attr-defined]

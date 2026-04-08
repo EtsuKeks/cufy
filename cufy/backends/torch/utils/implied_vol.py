@@ -42,35 +42,6 @@ def bs_price(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
     return bs_price_from_tensors(F=data.F_t, K=data.K_t, T=data.T_t, is_call=data.is_call_t, df=data.df_t, sigma=sigma)
 
 
-def _bs_vega_from_tensors(
-    *, F: torch.Tensor, K: torch.Tensor, T: torch.Tensor, df: torch.Tensor, sigma: torch.Tensor
-) -> torch.Tensor:
-    eps_t = config.eps
-    F_b, K_b, T_b, df_b = F[None, :], K[None, :], T[None, :], df[None, :]
-
-    T_safe = torch.clamp(T_b, min=eps_t)
-    sqrtT = torch.sqrt(T_safe)
-    logFK = torch.log(torch.clamp(F_b / K_b, min=eps_t))
-    C1 = logFK / sqrtT
-    C2 = 0.5 * sqrtT
-
-    sig = torch.clamp(sigma, min=eps_t)
-    d1 = torch.addcmul(C1 / sig, C2, sig)
-
-    vega_coeff = df_b * F_b * sqrtT * _INV_SQRT_2PI
-    return vega_coeff * torch.exp(d1.square().mul(-0.5))
-
-
-def bs_vega(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
-    return _bs_vega_from_tensors(F=data.F_t, K=data.K_t, T=data.T_t, df=data.df_t, sigma=sigma)
-
-
-def proxy_dsigma_dprice(*, data: TorchPreparedBatch, sigma: torch.Tensor) -> torch.Tensor:
-    eps_t = config.eps
-    vega = _bs_vega_from_tensors(F=data.F_t, K=data.K_t, T=data.T_t, df=data.df_t, sigma=sigma).clamp_min(eps_t)
-    return vega.reciprocal()
-
-
 def implied_vol_newton(
     *,
     price: torch.Tensor,
@@ -94,7 +65,7 @@ def implied_vol_newton(
 def weighted_iv(*, data: TorchPreparedBatch, pred_prices: torch.Tensor) -> torch.Tensor:
     pred_iv = implied_vol_newton(price=pred_prices, data=data, sigma_init=data.close_IV_t)
     d = pred_iv - data.close_IV_t[None, :]
-    s = d.square().mul(data.w_t).sum(1)
+    s = torch.einsum("bn,n->b", d.square(), data.w_t)
     return torch.sqrt(torch.clamp(s, min=0.0))
 
 
@@ -189,13 +160,10 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
             )
 
         C1, C2, vega_coeff, sigma = ctx.saved_tensors  # type: ignore[attr-defined]
-        eps_t = config.eps
-
-        sig = torch.clamp(sigma, min=eps_t)
+        sig = torch.clamp(sigma, min=config.eps)
         d1 = torch.addcmul(C1 / sig, C2, sig)
-        vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1.square()), min=eps_t)
-        grad_price = grad_sigma / vega
-        return grad_price, None, None, None, None, None, None, None, None
+        vega = torch.clamp(vega_coeff * torch.exp(-0.5 * d1.square()), min=config.eps)
+        return grad_sigma / vega, None, None, None, None, None, None, None, None
 
     @staticmethod
     def jvp(  # type: ignore[override]
@@ -210,4 +178,8 @@ class _ImpliedVolNewtonBS(torch.autograd.Function):
         max_iter_t: int | None,
         max_sigma_t: float | None,
     ) -> torch.Tensor:
-        raise RuntimeError("implied_vol_newton does not support forward-mode autodiff")
+        C1, C2, vega_coeff, sigma = ctx.saved_tensors  # type: ignore[attr-defined]
+        sig = sigma.clamp(min=config.eps)
+        d1 = torch.addcmul(C1 / sig, C2, sig)
+        vega = (vega_coeff * torch.exp(-0.5 * d1.square())).clamp_min(config.eps)
+        return price_t / vega

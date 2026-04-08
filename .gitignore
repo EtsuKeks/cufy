@@ -5,3 +5,4 @@ look_only_dependencies/
 .ruff_cache/
 .DS_Store
 **/__pycache__/
+cufy_example/

@@ -169,6 +169,14 @@ class BaseEvoSaxCalibrator(TunableCalibrator[TorchParameterizedModel]):
         raise NotImplementedError
 
     def calibrate(self, batch: PreparedBatch) -> None:
+        # All EvoSax strategies operate in normalised [0, 1]^d space: candidates from ask() are
+        # denormalised to [p_min, p_max] here, and only denormalised values are scored.
+        # This means the quality of calibrate_radii (p_range = p_max - p_min) directly determines
+        # the physical region explored — unlike PuzirCalibrator which normalises distances internally
+        # and is therefore less sensitive to p_range choice.
+        # With a reasonable p_range the algorithm remains correct: CMA-ES adapts its covariance C
+        # to the landscape shape within whatever region is given, so a suboptimal p_range shrinks
+        # or expands the search region but does not break algorithmic correctness.
         d = config.device
         dt = config.dtype
         data = TorchPreparedBatch.from_batch(batch)

@@ -16,6 +16,7 @@ device: torch.device = (
 
 dtype: torch.dtype = torch.float32 if dtype_str == "float32" else torch.float64
 
-eps: torch.Tensor = torch.tensor(float(os.environ.get("CUFY_EPS", "1e-8")), device=device, dtype=dtype)
+eps_float: float = float(os.environ.get("CUFY_EPS", "1e-8"))
+eps: torch.Tensor = torch.tensor(eps_float, device=device, dtype=dtype)
 
 mlflow_enabled: bool = os.environ.get("CUFY_MLFLOW", "1").strip() not in {"0", "false", "no"}

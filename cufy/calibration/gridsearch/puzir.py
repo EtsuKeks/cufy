@@ -98,7 +98,7 @@ class PuzirCalibrator(GridSearchCalibrator):
             cell = p_range / torch.tensor([max(x - 1, 1) for x in self._search_points_detailed], device=d, dtype=dt)
         else:
             cell = p_range * (self._checked_search_points ** (-1.0 / p_dim))
-        h = (cell * cfg.jitter_scale).clamp_min(eps)
+        h = (cell / 6.0 * cfg.jitter_scale).clamp_min(eps)
 
         total_batches = 0
         small_hist_batches = 0

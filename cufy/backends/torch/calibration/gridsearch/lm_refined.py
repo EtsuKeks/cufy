@@ -8,7 +8,7 @@ from torch.func import jacfwd, vmap
 import cufy.backends.torch.config as config
 from cufy.backends.torch.calibration.gridsearch.base import GridSearchCalibrator, GridSearchConfig
 from cufy.backends.torch.models.base import TorchParameterizedModel
-from cufy.backends.torch.utils.implied_vol import implied_vol_newton, proxy_dsigma_dprice
+from cufy.backends.torch.utils.implied_vol import implied_vol_newton
 from cufy.backends.torch.utils.torch_utils import TorchPreparedBatch
 
 
@@ -87,17 +87,15 @@ class GridSearchLMRefinedCalibrator(GridSearchCalibrator):
         with torch.no_grad():
             iv_cur, err_cur, E_cur = self._eval_err(P=p_cur, data=data, close_IV_t=close_IV_t, w_sqrt=w_sqrt)
 
-        def price_fn_single(p_flat: torch.Tensor) -> torch.Tensor:
-            return self.model.prices_for_param_matrix(data=data, param_matrix=p_flat[None, :])[0]
+        def err_fn_single(p_flat: torch.Tensor) -> torch.Tensor:
+            preds = self.model.prices_for_param_matrix(data=data, param_matrix=p_flat[None, :])[0]
+            iv = implied_vol_newton(price=preds[None, :], data=data, sigma_init=close_IV_t)[0]
+            return w_sqrt * (iv - close_IV_t)
 
         for _ in range(self.cfg.lm_steps):
-            with torch.no_grad():
-                didc = proxy_dsigma_dprice(data=data, sigma=iv_cur)
-
             with torch.enable_grad():
-                J_price = vmap(jacfwd(price_fn_single))(p_cur)
+                J = vmap(jacfwd(err_fn_single))(p_cur)
 
-            J = torch.einsum("bn,bnd->bnd", w_sqrt * didc, J_price)
             JtJ = J.mT @ J
             Jte = J.mT @ err_cur.unsqueeze(-1)
 

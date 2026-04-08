@@ -1,8 +1,8 @@
 import logging
+import math
 from dataclasses import dataclass
 from typing import Literal
 
-import numpy as np
 import optuna.trial
 import torch
 
@@ -63,8 +63,6 @@ class PuzirCalibrator(GridSearchCalibrator):
             raise ValueError(f"cfg.neighbors_k must be >= (num_params + 1) = {k_min}; got {self.cfg.neighbors_k}")
 
     def suggest(self, trial: optuna.trial.BaseTrial) -> None:
-        if self.cfg.damping > 0.0:
-            self.cfg.damping = trial.suggest_float("damping", self.cfg.damping * 1e-2, self.cfg.damping * 1e2, log=True)
         self.cfg.temperature = trial.suggest_float(
             "temperature", self.cfg.temperature * 1e-2, self.cfg.temperature * 1e2, log=True
         )
@@ -89,7 +87,13 @@ class PuzirCalibrator(GridSearchCalibrator):
 
         p_dim = len(self.model.params)
 
+        # p_range is used as a prior on parameter scales for three purposes:
+        #   1. kNN distance normalisation (dists) — assumes solution lies within [p_min, p_max]
+        #   2. jitter h for non-elite candidates — scales exploration noise per dimension
+        # Covariance, ridge/CMA drift, and Cholesky are computed in physical space with
+        # Jacobi preconditioning and do not depend on p_range.
         p_range = (p_max - p_min).clamp_min(eps)
+        p_range_inv = p_range.reciprocal()
         if cfg.sampler == "grid":
             cell = p_range / torch.tensor([max(x - 1, 1) for x in self._search_points_detailed], device=d, dtype=dt)
         else:
@@ -124,79 +128,82 @@ class PuzirCalibrator(GridSearchCalibrator):
             score_min = torch.min(self._hist_scores)
             weights = torch.exp((score_min - hist_s) / cfg.temperature).clamp_min(eps)
             idx = torch.multinomial(weights, num_samples=m, replacement=True)
-            base_scores = hist_s.index_select(0, idx)
-            base = hist_p.index_select(0, idx)
+            base_scores = hist_s[idx]
+            base = hist_p[idx]
 
             elite_cnt = max(1, int(float(m) ** cfg.elite_power))
             order = torch.argsort(base_scores)
             elite_idx = order[:elite_cnt]
             non_idx = order[elite_cnt:]
 
-            elites_s = base_scores.index_select(0, elite_idx)
-            elites = base.index_select(0, elite_idx)
-            non = base.index_select(0, non_idx)
+            elites_s = base_scores[elite_idx]
+            elites = base[elite_idx]
+            non = base[non_idx]
 
             cand_non = torch.addcmul(non, torch.randn_like(non), h[None, :]).clamp(min=p_min, max=p_max)
 
-            p_range_inv = p_range.reciprocal()
             elites_norm = (elites - p_min[None, :]) * p_range_inv[None, :]
             hist_norm = (hist_p - p_min[None, :]) * p_range_inv[None, :]
-            dists = torch.cdist(elites_norm, hist_norm)
+            dists = torch.cdist(elites_norm, hist_norm, compute_mode="donot_use_mm_for_euclid_dist")
             dists.masked_fill_(dists <= eps, float("inf"))
 
             k = min(cfg.neighbors_k, int(hist_p.shape[0]))
 
             nn_idx = torch.topk(dists, k=k, largest=False, sorted=False, dim=1).indices
-            neigh_norm = hist_norm[nn_idx]
+            neigh = hist_p[nn_idx]
             neigh_s = hist_s[nn_idx]
 
-            X_norm = neigh_norm - elites_norm[:, None, :]
-            XtX_norm = torch.bmm(X_norm.transpose(1, 2), X_norm)
-            cov_norm = XtX_norm.mul(1.0 / max(1, k - 1))
-            if cfg.damping > 0.0:
-                diag_reg = (cfg.damping * torch.diagonal(cov_norm, dim1=-2, dim2=-1)).clamp_min(eps)
-                cov_reg_norm = cov_norm + torch.diag_embed(diag_reg)
-            else:
-                cov_reg_norm = cov_norm
-            L_norm = _chol_pd_batch(cov_reg_norm)
+            X = neigh - elites[:, None, :]
+            XtX = X.mT @ X
+            cov = XtX.mul(1.0 / max(1, k - 1))
 
-            mu_norm = elites_norm
-            step_raw_norm: torch.Tensor | None = None
-            drift_dir_norm: torch.Tensor | None = None
+            D_inv = torch.diagonal(cov, dim1=-2, dim2=-1).clamp_min(eps).rsqrt()
+            cov_corr = torch.einsum("bi,bij,bj->bij", D_inv, cov, D_inv)
+            if cfg.damping > 0.0:
+                cov_corr = cov_corr + cfg.damping * torch.eye(p_dim, device=d, dtype=dt)
+            L_corr = _chol_pd_batch(cov_corr)
+
+            mu = elites
+            step_raw: torch.Tensor | None = None
+            drift_dir: torch.Tensor | None = None
             if cfg.drift_method == "ridge":
                 y = (neigh_s - elites_s[:, None]).unsqueeze(-1)
-                XtY_norm = torch.bmm(X_norm.transpose(1, 2), y)
-                g_norm = torch.cholesky_solve(XtY_norm / float(max(1, k - 1)), L_norm).squeeze(-1)
+                XtY = X.mT @ y
+                XtY_scaled = XtY * D_inv[:, :, None]
+                g_corr = torch.cholesky_solve(XtY_scaled, L_corr).squeeze(-1) / float(max(1, k - 1))
+                g = g_corr * D_inv
 
-                drift_dir_norm = -g_norm
-                step_raw_norm = torch.bmm(cov_reg_norm, drift_dir_norm[:, :, None]).squeeze(-1)
+                drift_dir = -g
+                step_raw = (cov @ drift_dir.unsqueeze(-1)).squeeze(-1)
             elif cfg.drift_method == "cma":
-                mu_n = max(1, int(np.floor(cfg.cma_mu_frac * k)))
+                assert cfg.cma_mu_frac is not None
+                mu_n = max(1, math.floor(cfg.cma_mu_frac * k))
 
                 top_pos = torch.topk(neigh_s, k=mu_n, largest=False, sorted=True, dim=1).indices
-                top_p_norm = torch.gather(neigh_norm, 1, top_pos[:, :, None].expand(-1, -1, p_dim))
+                top_p = torch.gather(neigh, 1, top_pos[:, :, None].expand(-1, -1, p_dim))
 
                 rank = torch.arange(1, mu_n + 1, device=d, dtype=dt)
                 w = torch.log(torch.as_tensor((mu_n + 0.5), device=d, dtype=dt) / rank)
                 w = w / w.sum()
 
-                step_raw_norm = (w[None, :, None] * top_p_norm).sum(dim=1) - elites_norm
-                drift_dir_norm = torch.cholesky_solve(step_raw_norm.unsqueeze(-1), L_norm).squeeze(-1)
+                step_raw = torch.einsum("n,end->ed", w, top_p) - elites
+                step_scaled = step_raw * D_inv
+                drift_dir_scaled = torch.cholesky_solve(step_scaled.unsqueeze(-1), L_corr).squeeze(-1)
+                drift_dir = drift_dir_scaled * D_inv
 
-            if cfg.drift_method in ("ridge", "cma") and step_raw_norm is not None and drift_dir_norm is not None:
-                quad_norm = (step_raw_norm * drift_dir_norm).sum(dim=1)
-                denom_norm = torch.sqrt(quad_norm.clamp_min(eps))
-                step_norm = torch.where(
-                    (quad_norm > eps)[:, None],
-                    step_raw_norm * (cfg.drift_mahalanobis_step / denom_norm)[:, None],  # type: ignore[operator]
-                    torch.zeros_like(step_raw_norm),
+            if cfg.drift_method in ("ridge", "cma") and step_raw is not None and drift_dir is not None:
+                quad = torch.einsum("ed,ed->e", step_raw, drift_dir)
+                denom = torch.sqrt(quad.clamp_min(eps))
+                step = torch.where(
+                    (quad > eps)[:, None],
+                    step_raw * (cfg.drift_mahalanobis_step / denom)[:, None],  # type: ignore[operator]
+                    step_raw.new_zeros(1),
                 )
-                mu_norm = elites_norm + step_norm
+                mu = (elites + step).clamp(min=p_min, max=p_max)
 
             z = torch.randn((elite_cnt, p_dim, 1), device=d, dtype=dt)
-            noise_norm = torch.bmm(L_norm, z).squeeze(-1)
-            cand_elite_norm = mu_norm + noise_norm
-            cand_elite = (cand_elite_norm * p_range[None, :] + p_min[None, :]).clamp(min=p_min, max=p_max)
+            noise = (L_corr @ z).squeeze(-1) / D_inv
+            cand_elite = (mu + noise).clamp(min=p_min, max=p_max)
 
             cand = torch.cat([cand_elite, cand_non], dim=0)
             scores = self._score_params(P=cand, data=data)

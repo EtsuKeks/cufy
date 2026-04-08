@@ -1,14 +1,14 @@
 # cufy
 
-A quantitative finance framework for option pricing and model calibration with GPU acceleration via PyTorch.
+A quantitative finance framework for option pricing and model calibration with GPU acceleration.
 
 ## Current State
 
 **Calibration Philosophy:** Currently, the framework is strictly focused on **time-series calibration** for predictive tasks (Alpha Signal Evaluation). To ensure stability, prevent overfitting, and maintain the physical meaning of parameters across time, we avoid fitting state variables (like $v_0$ in Heston/Bates) as free parameters. Instead, we derive them directly from market observables (e.g., using $\sigma_{ATM}$ as a deterministic proxy).
 
-**Backend:** PyTorch only for modeling and pricing, JAX for evolutionary calibration (EvoSAX).
+**Backend:** PyTorch for modeling and pricing, JAX for evolutionary calibration (EvoSAX). Long-term target is a full JAX backend — see *JAX Migration* under Planned/Infrastructure.
 
-**Device:** Single-device only. The framework assumes exclusive ownership of one GPU (or CPU). No multi-GPU, no distributed / cluster-wide execution.
+**Device:** Single-device only. The framework assumes exclusive ownership of one GPU (or CPU). No multi-GPU, no distributed / cluster-wide execution. This constraint disappears with the planned JAX migration (`jax.sharding`).
 
 **Contracts:** European options only. No American, Asian, or exotic contract types.
 
@@ -38,13 +38,12 @@ pip install cufy
 ### Infrastructure
 - **Documentation and API exports** — write detailed docstrings with academic paper references (Hagan, Merton Bates, etc.) for all models and methods; populate init files across the project to expose clean and convenient public APIs
 - **Reduce CPU-GPU transfers** — propagate `TorchOptionBatch` through `Runner` so numpy-tensor conversion happens once per fold rather than on every call
-- **MPI / multi-GPU support** — distributed scoring and calibration across a GPU cluster via MPI
+- **Multi-GPU support** — deferred to the JAX migration; `jax.sharding` + `shard_map` make multi-device distribution transparent without MPI boilerplate
 
 ### Calibration
 - **Target Abstraction** — currently, calibrators hardcode `weighted_iv` as the loss function. This needs to be abstracted so models can be calibrated directly on prices or other metrics. Crucially, the target must support both scalar scoring (for black-box optimizers like Puzir/EvoSax) and residual vector generation (for gradient-based methods like Levenberg-Marquardt)
 - **Optuna pruning** — shared explore phase across tuner trials + per-iteration pruning in refine; requires splitting calibration into explore-only / refine-only phases
-- **`torch.compile` for models and calibrators** — apply `torch.compile` to pricing model forward passes and calibrator inner loops so that elementwise chains (characteristic function → quadrature → IV loss) are fused into single GPU kernels by TorchInductor/Triton, eliminating redundant VRAM round-trips. Requires auditing dynamic shapes (variable option counts per batch) and replacing Python-level control flow that breaks graph capture with tensor-level equivalents.
-- **In-place operation audit** — systematically audit calibrator and model hot paths for opportunities to replace out-of-place tensor operations with in-place equivalents (`add_`, `mul_`, `masked_fill_`, etc.) where safe: freshly allocated tensors with a single owner, outside autograd graphs, no aliasing. In-place ops eliminate extra allocations and reduce memory bandwidth pressure in eager mode; under `torch.compile` they are equally valid since Inductor traces them as standard `aten` ops and generates its own in-place fusions on top.
+- **JAX Migration** — port the core framework and pricing models to a full JAX backend. Motivations: (1) `jax.vmap` is mature and composes correctly with `lax.while_loop`, enabling batched gradient-based calibrators (L-BFGS, CG) with per-element early stopping — currently impossible in PyTorch due to missing `vmap` batching rule for `while_loop` and the open `vmap(jacfwd(...))` + `torch.compile` bug (#151196); (2) `jax.sharding` + `shard_map` make multi-GPU distribution trivial without MPI boilerplate; (3) XLA compiles the full calibration loop — characteristic function, quadrature, IV inversion — as a single kernel, including `vmap`-ed inner loops. The migration will eliminate the `backends/torch` abstraction layer entirely, promote JAX arrays to the `core` level, remove the CPU↔GPU transfer bottleneck (data lives natively on-device from the start), and replace the current filtering logic with a **DataSource contract**. EvoSAX already runs on JAX; pricing models and gradient-based calibrators are the remaining work.
 - **Runtime sensitivity estimation for kNN in PuzirCalibrator** — `p_range = p_max - p_min` is used as a prior on parameter scales for kNN distance normalisation (`dists`) and non-elite jitter. The remaining dependence on `p_range` is the neighbourhood structure: if bounds don't reflect the true sensitivity of the loss, kNN finds wrong neighbours. A better approach: during `memory_probation` (where random parameter batches are already evaluated), fit a shallow random forest on `(params → score)` and use leaf co-occurrence proximity for kNN instead of normalised Euclidean distance. This would make `calibrate_radii` a pure guardrail rather than a tuning knob that affects neighbourhood quality.
 
 ### Models
@@ -54,8 +53,8 @@ pip install cufy
 - **Path-Dependent Volatility (PDV / Guyon-Lipton)** — advanced frontier models that construct the instantaneous volatility surface directly from the historical path of the underlying asset, completely eliminating the need for unobservable state variables
 - **Historical fit for analytical models** — calibrate parameters that are identifiable from underlying price history (e.g. drift, vol-of-vol) directly from discounted underlying price series, reducing the degrees of freedom left to the options calibrator
 - **Advanced Quadrature Methods** — implement Filon's Quadrature (for deep OTM/ITM options with highly oscillatory integrands) and Double-Exponential (Tanh-Sinh) Quadrature (for robust, cryptographically high-precision ground truth testing of other algorithms). Note: the current architecture hardcodes both the quadrature rule (Gauss-Legendre / Simpson) and the pricing formula (Attari). Supporting alternative quadratures and alternative Fourier pricing methods (COS, Carr-Madan FFT, frame projection) will require a deeper architectural change — decoupling quadrature strategy, pricing formula, and model characteristic function into separate, independently swappable components.
-- **Integration Optimization (Heston/Bates)** — currently, the characteristic function is evaluated for every option individually ($N$ times). This avoids OOM risks and `torch.compile` graph-break issues from dynamic shapes, but leaves a large speedup on the table for datasets with few unique expirations ($U \ll N$). Future versions should group evaluations by unique TTM ($U$ times), broadcast results back to all options sharing that expiry, and handle dynamic shapes safely under `torch.compile`.
-- **Analytical Jacobians & Gradients** — currently Jacobian (and potentially gradients) are vomputed via `torch.func.jacfwd` (forward-mode AD), which requires one forward pass per parameter. For models with known closed-form derivatives this is unnecessary overhead which should be reduced
+- **Integration Optimization (Heston/Bates)** — currently, the characteristic function is evaluated for every option individually ($N$ times). This avoids OOM risks but leaves a large speedup on the table for datasets with few unique expirations ($U \ll N$). Future versions should group evaluations by unique TTM ($U$ times) and broadcast results back to all options sharing that expiry. Dynamic shape handling becomes clean under JAX/XLA via `jax.vmap` over unique expirations.
+- **Analytical Jacobians & Gradients** — currently the Jacobian is computed via `torch.func.jacfwd` (forward-mode AD), requiring one forward pass per parameter. For models with known closed-form derivatives this is unnecessary overhead. Under JAX the natural path is hand-written JVP rules via `jax.custom_jvp`.
 - **Neural SDEs / Neural Stochastic Volatility** — hybrid frontier models that use neural networks to learn the drift and diffusion coefficients of the volatility process directly from panel data, bridging the gap between rigorous analytical SDEs and deep learning
 
 ### Contracts & hedging
